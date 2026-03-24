@@ -215,17 +215,36 @@ def summarize_daily_logs() -> dict[str, Any]:
             else:
                 summary = full_content
 
-            # Write weekly summary
+            # Write weekly summary using atomic write pattern to prevent
+            # data loss if a crash occurs between writing and deleting logs
             weekly_file = _get_weekly_dir() / f"{week_key}.md"
+            tmp_file = weekly_file.with_suffix(".tmp")
             header = f"# Weekly Summary: {week_key}\n\n"
             header += f"*Generated: {datetime.now().isoformat()}*\n"
             header += f"*Source: {len(logs)} daily logs*\n\n---\n\n"
-            weekly_file.write_text(header + summary, encoding="utf-8")
+            tmp_file.write_text(header + summary, encoding="utf-8")
 
-            # Archive original files (move to archive or delete)
+            # Verify the temp file was written successfully before proceeding
+            if not tmp_file.exists() or tmp_file.stat().st_size == 0:
+                raise OSError(
+                    f"Failed to write temporary summary file for {week_key}"
+                )
+
+            # Atomically move temp file to final destination (atomic on same filesystem)
+            os.replace(str(tmp_file), str(weekly_file))
+
+            # Only delete daily logs after the summary is safely persisted
             for log in logs:
-                log.unlink()
-                result["files_processed"] += 1
+                try:
+                    log.unlink()
+                    result["files_processed"] += 1
+                except OSError as unlink_err:
+                    logger.warning(
+                        f"Failed to delete archived log {log}: {unlink_err}"
+                    )
+                    result["errors"].append(
+                        f"Delete failed for {log.name}: {unlink_err}"
+                    )
 
             result["weeks_created"].append(week_key)
             logger.info(f"Created weekly summary: {week_key} from {len(logs)} logs")
