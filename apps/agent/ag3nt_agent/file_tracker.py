@@ -81,7 +81,15 @@ class FileTracker:
             file_path: Absolute path to the file that was read.
         """
         file_path = os.path.normpath(file_path)
-        mtime = os.path.getmtime(file_path)
+        try:
+            mtime = os.path.getmtime(file_path)
+        except OSError:
+            logger.warning(
+                "Cannot record read: file no longer exists: session=%s file=%s",
+                session_id,
+                file_path,
+            )
+            return
         now = time.time()
 
         with self._meta_lock:
@@ -156,7 +164,13 @@ class FileTracker:
             )
 
         record = session_files[file_path]
-        current_mtime = os.path.getmtime(file_path)
+        try:
+            current_mtime = os.path.getmtime(file_path)
+        except FileNotFoundError:
+            raise StaleFileError(
+                f"File '{file_path}' was deleted since you last read it. "
+                "It must be re-created and re-read before editing."
+            )
 
         if current_mtime != record.mtime_at_read:
             raise StaleFileError(
