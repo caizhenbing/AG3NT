@@ -199,7 +199,7 @@ export const askAI = createAction({
       tools: context.propsValue.webSearch
         ? createWebSearchTool(provider, webSearchOptions)
         : undefined,
-      stopWhen: stepCountIs(webSearchOptions?.maxUses ?? 5),
+      ...(context.propsValue.webSearch ? { stopWhen: stepCountIs(webSearchOptions?.maxUses ?? 5) } : {}),
     });
 
     conversation?.push({
