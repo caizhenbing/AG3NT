@@ -315,6 +315,10 @@ class ArtifactStore:
     def delete_artifact(self, artifact_id: str) -> bool:
         """Delete an artifact by ID.
 
+        Uses an idempotent delete pattern so concurrent deletes are safe:
+        missing_ok=True on unlink() and dict.pop() prevent races from raising
+        FileNotFoundError or KeyError.
+
         Args:
             artifact_id: The artifact ID to delete
 
@@ -323,20 +327,19 @@ class ArtifactStore:
         """
         self._ensure_initialized()
 
-        if artifact_id not in self._metadata_cache:
+        # Pop from cache atomically under lock; if absent another caller won.
+        with self._lock:
+            removed = self._metadata_cache.pop(artifact_id, None)
+
+        if removed is None:
             return False
 
-        # Delete content file
+        # Delete content file (missing_ok handles concurrent unlink)
         content_path = self._get_content_path(artifact_id)
         try:
-            if content_path.exists():
-                content_path.unlink()
+            content_path.unlink(missing_ok=True)
         except OSError as e:
             logger.warning(f"Failed to delete artifact file {artifact_id}: {e}")
-
-        # Remove from cache (metadata file is append-only, cleanup rewrites it)
-        with self._lock:
-            del self._metadata_cache[artifact_id]
 
         logger.info(f"Deleted artifact {artifact_id}")
         return True
