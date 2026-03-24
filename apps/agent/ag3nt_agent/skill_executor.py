@@ -7,6 +7,7 @@ Provides tools for executing skill entrypoints defined in SKILL.md files.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -149,6 +150,23 @@ def run_skill(
         script_parts = script_path.split()
         base_script = skill_dir / script_parts[0]
         script_args = script_parts[1:] if len(script_parts) > 1 else []
+
+        # Security: Validate entrypoint path is within the skill directory.
+        # An attacker-controlled YAML could use path traversal (e.g., "../../malicious")
+        # to point to arbitrary binaries outside the skill directory.
+        resolved_script = os.path.realpath(str(base_script))
+        resolved_skill_dir = os.path.realpath(str(skill_dir))
+        if not resolved_script.startswith(resolved_skill_dir + os.sep) and resolved_script != resolved_skill_dir:
+            logger.error(
+                f"Security violation: entrypoint script '{script_parts[0]}' "
+                f"resolves to '{resolved_script}' which is outside the skill "
+                f"directory '{resolved_skill_dir}'"
+            )
+            return (
+                f"Error: Security violation — entrypoint script path "
+                f"'{script_parts[0]}' escapes the skill directory. "
+                f"Scripts must be located within the skill's own directory."
+            )
 
         if not base_script.exists():
             return f"Error: Script not found: {base_script}"
