@@ -67,7 +67,7 @@ DANGEROUS_PATTERNS: list[tuple[str, str]] = [
     (r">\s*/dev/[sh]d[a-z]", "Direct disk write"),
     # Fork bombs and resource exhaustion
     (r":\(\)\s*\{\s*:\|:&\s*\}\s*;:", "Fork bomb detected"),
-    (r"\bwhile\s+true\s*;\s*do", "Infinite loop pattern"),
+    (r"(\bwhile\s+(true|:)\s*;\s*do|\buntil\s+false\s*;\s*do)", "Infinite loop pattern"),
     # Privilege escalation
     (r"\bsudo\s+", "Sudo command (requires explicit approval)"),
     (r"\bsu\s+-", "Switch user command"),
