@@ -55,17 +55,25 @@ async function proxyToAgent(
     const response = await fetch(url, fetchInit);
 
     if (!response.ok) {
+      const rawError = await response.text();
+
+      // Parse upstream error body: if it's already JSON, use the parsed
+      // object so we don't double-serialize when calling res.json().
+      let error: unknown;
+      try {
+        error = JSON.parse(rawError);
+      } catch {
+        error = rawError;
+      }
+
       if (response.status === 404) {
-        const error = await response.text();
         res.status(404).json({ ok: false, error: error || 'Not found' });
         return;
       }
       if (response.status === 403) {
-        const error = await response.text();
         res.status(403).json({ ok: false, error: error || 'Forbidden' });
         return;
       }
-      const error = await response.text();
       res.status(response.status).json({ ok: false, error });
       return;
     }
