@@ -162,6 +162,7 @@ export interface QueueManagerConfig {
   queueEnabled: boolean;
   queueIntervalMs: number;
   maxQueueSize: number;
+  maxConcurrent?: number;
 }
 
 export class QueueManager {
@@ -257,6 +258,9 @@ export class QueueManager {
    * Process the next item from the queue.
    */
   async processNext(): Promise<void> {
+    const maxConcurrent = this.config.maxConcurrent ?? 10;
+    if (this.stats.processing >= maxConcurrent) return;
+
     const item = this.queue.dequeue();
     if (!item) return;
 
