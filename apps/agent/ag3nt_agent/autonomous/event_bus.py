@@ -337,16 +337,18 @@ class EventBus:
                 handlers = self._get_handlers_for_event(event)
 
                 # Invoke handlers
-                for subscription in handlers:
-                    await self._invoke_handler(subscription, event)
+                try:
+                    for subscription in handlers:
+                        await self._invoke_handler(subscription, event)
 
-                self._metrics["events_processed"] += 1
-                self._queue.task_done()
+                    self._metrics["events_processed"] += 1
+                except Exception as e:
+                    logger.error(f"Error in event processor: {e}", exc_info=True)
+                finally:
+                    self._queue.task_done()
 
             except asyncio.CancelledError:
                 break
-            except Exception as e:
-                logger.error(f"Error in event processor: {e}", exc_info=True)
 
     def _get_handlers_for_event(self, event: Event) -> list[Subscription]:
         """Get all handlers that should receive this event."""
