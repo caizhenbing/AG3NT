@@ -173,10 +173,23 @@ export class SessionManager {
   }
 
   private matchesPattern(value: string, pattern: string): boolean {
-    const regex = new RegExp(
-      "^" + pattern.replace(/\*/g, "[^:]*").replace(/\?/g, ".") + "$"
-    );
-    return regex.test(value);
+    // Escape all regex metacharacters first to prevent ReDoS and invalid
+    // regex crashes from user-supplied allowlist patterns, then convert
+    // glob wildcards (* and ?) to their regex equivalents.
+    const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regexStr =
+      "^" +
+      escaped
+        .replace(/\\\*/g, "[^:]*")  // restore escaped * → segment wildcard
+        .replace(/\\\?/g, ".")      // restore escaped ? → single char
+      + "$";
+    try {
+      const regex = new RegExp(regexStr);
+      return regex.test(value);
+    } catch {
+      // Defensive: if regex is still somehow invalid, fail closed
+      return false;
+    }
   }
 
   /**
