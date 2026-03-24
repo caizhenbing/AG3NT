@@ -285,7 +285,21 @@ export class NodeConnectionManager {
         },
       };
 
-      conn.ws.send(JSON.stringify(msg));
+      try {
+        conn.ws.send(JSON.stringify(msg));
+      } catch (err) {
+        // WebSocket send failed (e.g., socket closing/closed) — clean up the
+        // pending action so the caller gets an immediate error instead of
+        // hanging until the action timeout fires.
+        clearTimeout(timeoutHandle);
+        this.pendingActions.delete(requestId);
+        const message =
+          err instanceof Error ? err.message : String(err);
+        console.error(
+          `[NodeConnectionManager] Failed to send action ${requestId} to node ${nodeId}: ${message}`
+        );
+        reject(new Error(`Failed to send action to node ${nodeId}: ${message}`));
+      }
     });
   }
 
