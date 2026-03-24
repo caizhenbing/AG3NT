@@ -260,10 +260,16 @@ class MemoryFlusher:
         solutions: list[str],
     ) -> None:
         """Write extracted insights to daily log file."""
-        DAILY_LOG_DIR.mkdir(parents=True, exist_ok=True)
-
         today = datetime.now().strftime("%Y-%m-%d")
         log_file = DAILY_LOG_DIR / f"{today}.md"
+
+        try:
+            DAILY_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.error(
+                f"Failed to create daily log directory '{DAILY_LOG_DIR}': {e}"
+            )
+            return
 
         timestamp = datetime.now().strftime("%H:%M")
         lines = [f"\n## Auto-flush at {timestamp}\n"]
@@ -288,8 +294,14 @@ class MemoryFlusher:
             for s in solutions:
                 lines.append(f"- {s}\n")
 
-        with open(log_file, "a", encoding="utf-8") as f:
-            f.writelines(lines)
+        try:
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.writelines(lines)
+        except OSError as e:
+            logger.error(
+                f"Failed to write insights to '{log_file}': {e}"
+            )
+            return
 
         logger.debug(f"Wrote insights to {log_file}")
 
