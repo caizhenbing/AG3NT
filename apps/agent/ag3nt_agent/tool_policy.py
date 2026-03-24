@@ -474,4 +474,10 @@ class PathProtectionMiddleware(AgentMiddleware):  # type: ignore
         if hasattr(response, 'override'):
             return response.override(tool_calls=allowed_calls)
 
-        return response
+        blocked_descriptions = "; ".join(
+            f"{name} on {path}: {msg}" for name, path, msg in blocked_calls
+        )
+        raise PermissionError(
+            f"PathProtection blocked write operations and response type "
+            f"{type(response).__name__} does not support override: {blocked_descriptions}"
+        )
