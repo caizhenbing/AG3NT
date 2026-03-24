@@ -455,11 +455,14 @@ class LspClient:
         if uri in self._diagnostics:
             return self._diagnostics[uri]
 
-        # Set up an event and wait for diagnostics to arrive
+        # Set up an event and wait for diagnostics to arrive.
+        # NOTE: We must NOT clear() before wait() — doing so creates a TOCTOU
+        # race where a concurrent notification can set the event between the
+        # existence check and clear(), causing wait() to block for a second
+        # notification that may never come.  Instead, we let wait() return
+        # immediately if the event is already set, then clear afterwards.
         if uri not in self._diagnostics_event:
             self._diagnostics_event[uri] = asyncio.Event()
-        else:
-            self._diagnostics_event[uri].clear()
 
         try:
             await asyncio.wait_for(
@@ -468,6 +471,8 @@ class LspClient:
         except asyncio.TimeoutError:
             logger.debug("Timed out waiting for diagnostics on %s", uri)
             return []
+        finally:
+            self._diagnostics_event[uri].clear()
 
         return self._diagnostics.get(uri, [])
 
