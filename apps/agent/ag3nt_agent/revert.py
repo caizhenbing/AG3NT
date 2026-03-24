@@ -113,11 +113,17 @@ class SessionRevert:
 
     def _get_state(self, session_id: str) -> RevertState:
         """Get or create revert state for a session."""
-        if session_id not in self._sessions:
-            with self._session_lock:
-                if session_id not in self._sessions:
-                    self._sessions[session_id] = RevertState()
-        return self._sessions[session_id]
+        # Fast path: return existing state without acquiring the lock.
+        state = self._sessions.get(session_id)
+        if state is not None:
+            return state
+        # Slow path: acquire lock and double-check before creating.
+        with self._session_lock:
+            state = self._sessions.get(session_id)
+            if state is None:
+                state = RevertState()
+                self._sessions[session_id] = state
+            return state
 
     def record_action(
         self,
