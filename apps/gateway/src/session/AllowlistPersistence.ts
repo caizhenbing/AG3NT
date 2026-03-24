@@ -14,6 +14,43 @@ export interface AllowlistStore {
 }
 
 /**
+ * Per-file promise-based write lock.
+ *
+ * Serializes read-modify-write operations on a given file path so that
+ * concurrent callers to addToAllowlist / removeFromAllowlist do not
+ * race and silently drop each other's changes.
+ */
+const fileLocks = new Map<string, Promise<unknown>>();
+
+async function withFileLock<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
+  const key = path.resolve(expandPath(filePath));
+
+  // Chain onto whatever is currently pending for this file (or resolve immediately).
+  const prev = fileLocks.get(key) ?? Promise.resolve();
+
+  let releaseLock: () => void;
+  const gate = new Promise<void>((resolve) => {
+    releaseLock = resolve;
+  });
+
+  // Register *our* gate so the next caller waits for us.
+  fileLocks.set(key, gate);
+
+  // Wait for the previous operation to finish before we start.
+  await prev;
+
+  try {
+    return await fn();
+  } finally {
+    // Clean up the map entry if nothing else queued behind us.
+    if (fileLocks.get(key) === gate) {
+      fileLocks.delete(key);
+    }
+    releaseLock!();
+  }
+}
+
+/**
  * Expand ~ to home directory.
  */
 function expandPath(filePath: string): string {
@@ -74,12 +111,14 @@ export async function addToAllowlist(
   filePath: string,
   entry: string
 ): Promise<string[]> {
-  const allowlist = await loadAllowlist(filePath);
-  if (!allowlist.includes(entry)) {
-    allowlist.push(entry);
-    await saveAllowlist(filePath, allowlist);
-  }
-  return allowlist;
+  return withFileLock(filePath, async () => {
+    const allowlist = await loadAllowlist(filePath);
+    if (!allowlist.includes(entry)) {
+      allowlist.push(entry);
+      await saveAllowlist(filePath, allowlist);
+    }
+    return allowlist;
+  });
 }
 
 /**
@@ -89,9 +128,11 @@ export async function removeFromAllowlist(
   filePath: string,
   entry: string
 ): Promise<string[]> {
-  let allowlist = await loadAllowlist(filePath);
-  allowlist = allowlist.filter((e) => e !== entry);
-  await saveAllowlist(filePath, allowlist);
-  return allowlist;
+  return withFileLock(filePath, async () => {
+    let allowlist = await loadAllowlist(filePath);
+    allowlist = allowlist.filter((e) => e !== entry);
+    await saveAllowlist(filePath, allowlist);
+    return allowlist;
+  });
 }
 
