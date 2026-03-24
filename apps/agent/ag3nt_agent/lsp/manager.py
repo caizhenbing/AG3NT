@@ -47,6 +47,8 @@ class LspManager:
         self._opened_files: set[str] = set()
         # Guards concurrent start attempts for the same language
         self._start_locks: dict[str, asyncio.Lock] = {}
+        # Meta-lock protecting creation of per-key locks in _start_locks
+        self._meta_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
     # Singleton access
@@ -91,10 +93,15 @@ class LspManager:
         return config.name
 
     async def _ensure_lock(self, key: str) -> asyncio.Lock:
-        """Get or create a per-key asyncio lock."""
-        if key not in self._start_locks:
-            self._start_locks[key] = asyncio.Lock()
-        return self._start_locks[key]
+        """Get or create a per-key asyncio lock.
+
+        Uses ``_meta_lock`` to prevent two coroutines from creating
+        separate Lock instances for the same key concurrently.
+        """
+        async with self._meta_lock:
+            if key not in self._start_locks:
+                self._start_locks[key] = asyncio.Lock()
+            return self._start_locks[key]
 
     # ------------------------------------------------------------------
     # Server lifecycle
