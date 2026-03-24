@@ -96,6 +96,38 @@ class Action:
     retry_count: int = 1
     retry_delay_seconds: int = 5
 
+    @staticmethod
+    def _safe_resolve(expr: str, context: dict) -> str:
+        """
+        Safely resolve a dotted-path expression against a context dict.
+
+        Only allows dotted identifiers (e.g. 'event.payload.severity').
+        Traverses only dict objects via key lookup — no getattr, no indexing,
+        no function calls, no dunder access.
+
+        Raises ValueError for invalid or disallowed expressions.
+        """
+        # Strict validation: only dotted identifiers (letters, digits, underscores)
+        if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*', expr):
+            raise ValueError(f"Invalid template expression: {expr!r}")
+
+        # Reject any dunder segments
+        for segment in expr.split('.'):
+            if segment.startswith('__') or segment.endswith('__'):
+                raise ValueError(f"Dunder attributes are not allowed: {expr!r}")
+
+        # Walk the dotted path using only dict key lookups
+        parts = expr.split('.')
+        current = context
+        for part in parts:
+            if not isinstance(current, dict):
+                raise ValueError(f"Cannot traverse non-dict value at '{part}' in {expr!r}")
+            if part not in current:
+                raise ValueError(f"Key '{part}' not found in {expr!r}")
+            current = current[part]
+
+        return str(current)
+
     def render(self, event: Event) -> "Action":
         """
         Render action with event data substituted.
@@ -130,11 +162,11 @@ class Action:
             for match in matches:
                 expr = match.group(1).strip()
                 try:
-                    # Evaluate expression against context
-                    value = eval(expr, {"__builtins__": {}}, context)
-                    result = result.replace(match.group(0), str(value))
-                except Exception:
-                    # Keep original if evaluation fails
+                    # Safely resolve dotted-path expression against context
+                    value = Action._safe_resolve(expr, context)
+                    result = result.replace(match.group(0), value)
+                except (ValueError, Exception):
+                    # Keep original if resolution fails
                     pass
 
             return result
