@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import os
 import platform
+import shlex
 import subprocess
 import threading
 import time
@@ -285,9 +286,20 @@ def _run_foreground(
         try:
             import pexpect
 
+            try:
+                cmd_args = shlex.split(command)
+            except ValueError as e:
+                return {
+                    "stdout": "",
+                    "stderr": f"Command parse error: {e}",
+                    "exit_code": -1,
+                    "duration": 0,
+                    "truncated": False,
+                }
+
             child = pexpect.spawn(
-                "/bin/bash",
-                ["-c", command],
+                cmd_args[0],
+                cmd_args[1:],
                 cwd=cwd,
                 env=merged_env,
                 timeout=timeout,
@@ -333,9 +345,20 @@ def _run_foreground(
 
     # Subprocess fallback
     try:
+        try:
+            cmd_args = shlex.split(command)
+        except ValueError as e:
+            return {
+                "stdout": "",
+                "stderr": f"Command parse error: {e}",
+                "exit_code": -1,
+                "duration": 0,
+                "truncated": False,
+            }
+
         proc = subprocess.Popen(
-            command,
-            shell=True,
+            cmd_args,
+            shell=False,
             cwd=cwd,
             env=merged_env,
             stdout=subprocess.PIPE,
@@ -425,9 +448,24 @@ def _run_background(
         try:
             import pexpect
 
+            try:
+                cmd_args = shlex.split(command)
+            except ValueError as e:
+                session.status = "error"
+                session.append_output(f"Command parse error: {e}")
+                session.end_time = time.time()
+                registry.register(session)
+                registry.finish(session_id)
+                return {
+                    "session_id": session_id,
+                    "status": session.status,
+                    "pid": None,
+                    "initial_output": session.get_pending_output(),
+                }
+
             child = pexpect.spawn(
-                "/bin/bash",
-                ["-c", command],
+                cmd_args[0],
+                cmd_args[1:],
                 cwd=cwd,
                 env=merged_env,
                 encoding="utf-8",
@@ -475,9 +513,24 @@ def _run_background(
 
     # Subprocess fallback
     try:
+        try:
+            cmd_args = shlex.split(command)
+        except ValueError as e:
+            session.status = "error"
+            session.append_output(f"Command parse error: {e}")
+            session.end_time = time.time()
+            registry.register(session)
+            registry.finish(session_id)
+            return {
+                "session_id": session_id,
+                "status": session.status,
+                "pid": None,
+                "initial_output": session.get_pending_output(),
+            }
+
         proc = subprocess.Popen(
-            command,
-            shell=True,
+            cmd_args,
+            shell=False,
             cwd=cwd,
             env=merged_env,
             stdout=subprocess.PIPE,
