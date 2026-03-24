@@ -336,31 +336,129 @@ class RedisStateSync:
         )
         await self._publish(session_id, state)
 
+    # Lua script for atomic optimistic-locking update.
+    # KEYS[1] = session key
+    # ARGV[1] = JSON-encoded updates dict
+    # ARGV[2] = current timestamp string
+    # Returns the new JSON state on success, or nil if the key doesn't exist.
+    # The script reads, merges, bumps version, and writes in a single atomic op.
+    _UPDATE_LUA = """
+    local data = redis.call('GET', KEYS[1])
+    if not data then
+        return nil
+    end
+    local state = cjson.decode(data)
+    local updates = cjson.decode(ARGV[1])
+    for k, v in pairs(updates) do
+        state[k] = v
+    end
+    state['updatedAt'] = ARGV[2]
+    local ver = state['version']
+    if ver == nil or ver == false then
+        ver = 0
+    end
+    state['version'] = ver + 1
+    local encoded = cjson.encode(state)
+    redis.call('SET', KEYS[1], encoded)
+    return encoded
+    """
+
+    async def _get_update_script(self):
+        """Return a cached Redis Script object for the update Lua script."""
+        if not hasattr(self, '_update_script_obj') or self._update_script_obj is None:
+            self._update_script_obj = self.redis.register_script(self._UPDATE_LUA)
+        return self._update_script_obj
+
     async def update_session(
         self,
         session_id: str,
         updates: dict[str, Any],
     ) -> SessionState:
-        """Update session state atomically."""
-        # Get current state
-        data = await self.redis.get(f"{self._key_prefix}{session_id}")
-        if not data:
-            raise ValueError(f"Session not found: {session_id}")
+        """Update session state atomically using optimistic locking.
 
-        state_dict = json.loads(data)
-        state_dict.update(updates)
-        state_dict["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        state_dict["version"] = state_dict.get("version", 0) + 1
+        Uses a Redis Lua script to perform an atomic read-modify-write,
+        preventing concurrent agents from clobbering each other's updates.
+        Falls back to WATCH/MULTI/EXEC with retries if Lua execution fails.
+        """
+        key = f"{self._key_prefix}{session_id}"
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        updates_json = json.dumps(updates)
 
-        await self.redis.set(
-            f"{self._key_prefix}{session_id}",
-            json.dumps(state_dict),
+        # Primary path: atomic Lua script (single round-trip, no race window)
+        try:
+            script = await self._get_update_script()
+            result = await script(keys=[key], args=[updates_json, now])
+            if result is None:
+                raise ValueError(f"Session not found: {session_id}")
+            state_dict = json.loads(result)
+            updated = SessionState.from_dict(state_dict)
+            await self._publish(session_id, updated)
+            return updated
+        except Exception as lua_err:
+            # If the error is "Session not found", re-raise immediately
+            if "Session not found" in str(lua_err):
+                raise
+            logger.warning(
+                "Lua script failed for session %s, falling back to "
+                "WATCH/MULTI/EXEC: %s",
+                session_id,
+                lua_err,
+            )
+
+        # Fallback path: WATCH/MULTI/EXEC optimistic locking with retries
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                async with self.redis.pipeline(transaction=False) as pipe:
+                    await pipe.watch(key)
+
+                    data = await pipe.get(key)
+                    if not data:
+                        raise ValueError(f"Session not found: {session_id}")
+
+                    state_dict = json.loads(data)
+                    expected_version = state_dict.get("version", 0)
+
+                    state_dict.update(updates)
+                    state_dict["updatedAt"] = time.strftime(
+                        "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
+                    )
+                    state_dict["version"] = expected_version + 1
+
+                    # Begin transactional block
+                    pipe.multi()
+                    pipe.set(key, json.dumps(state_dict))
+                    results = await pipe.execute()
+
+                    # If EXEC succeeds (results is not None), write committed
+                    if results is not None:
+                        updated = SessionState.from_dict(state_dict)
+                        await self._publish(session_id, updated)
+                        return updated
+
+            except Exception as watch_err:
+                if "Session not found" in str(watch_err):
+                    raise
+                # WatchError or other transient failure — retry
+                if attempt < max_retries - 1:
+                    logger.warning(
+                        "Optimistic lock conflict on session %s "
+                        "(attempt %d/%d): %s",
+                        session_id,
+                        attempt + 1,
+                        max_retries,
+                        watch_err,
+                    )
+                    continue
+                raise RuntimeError(
+                    f"Failed to update session {session_id} after "
+                    f"{max_retries} attempts due to concurrent modifications"
+                ) from watch_err
+
+        raise RuntimeError(
+            f"Failed to update session {session_id} after "
+            f"{max_retries} attempts due to concurrent modifications"
         )
-
-        updated = SessionState.from_dict(state_dict)
-        await self._publish(session_id, updated)
-
-        return updated
 
     async def delete_session(self, session_id: str) -> bool:
         """Delete a session from Redis."""
