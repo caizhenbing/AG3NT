@@ -23,6 +23,32 @@ export function createStateRouter(): Router {
   const router = Router();
 
   /**
+   * Get store statistics.
+   */
+  router.get("/stats", async (_req: Request, res: Response) => {
+    try {
+      const store = await getStateStore();
+
+      // Get stats if available (InMemoryStateStore has getStats)
+      const stats =
+        store instanceof InMemoryStateStore
+          ? store.getStats()
+          : { sessionCount: (await store.listSessions()).length };
+
+      res.json({
+        ok: true,
+        stats,
+        backend: store instanceof InMemoryStateStore ? "memory" : "redis",
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : "Unknown error",
+      });
+    }
+  });
+
+  /**
    * Get session state.
    */
   router.get("/:sessionId", async (req: Request, res: Response) => {
@@ -149,32 +175,6 @@ export function createStateRouter(): Router {
         ok: true,
         sessions: sessionIds,
         count: sessionIds.length,
-      });
-    } catch (err) {
-      res.status(500).json({
-        ok: false,
-        error: err instanceof Error ? err.message : "Unknown error",
-      });
-    }
-  });
-
-  /**
-   * Get store statistics.
-   */
-  router.get("/stats", async (_req: Request, res: Response) => {
-    try {
-      const store = await getStateStore();
-
-      // Get stats if available (InMemoryStateStore has getStats)
-      const stats =
-        store instanceof InMemoryStateStore
-          ? store.getStats()
-          : { sessionCount: (await store.listSessions()).length };
-
-      res.json({
-        ok: true,
-        stats,
-        backend: store instanceof InMemoryStateStore ? "memory" : "redis",
       });
     } catch (err) {
       res.status(500).json({
