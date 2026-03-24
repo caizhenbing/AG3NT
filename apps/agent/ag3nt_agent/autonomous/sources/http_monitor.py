@@ -183,6 +183,14 @@ class HTTPMonitor:
 
     async def _check_endpoint(self, endpoint: HTTPEndpoint) -> CheckResult:
         """Perform a health check on an endpoint."""
+        if self._client is None:
+            return CheckResult(
+                endpoint_id=endpoint.id,
+                url=endpoint.url,
+                success=False,
+                error="Client closed"
+            )
+
         start_time = datetime.utcnow()
 
         try:
