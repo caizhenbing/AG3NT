@@ -23,8 +23,9 @@ const polling: Polling<AppConnectionValueForAuthProperty<typeof postgresAuth>, {
             const result = await client.query(query);
             const items = result.rows.map(function (row) {
                 const rowHash = crypto.createHash('md5').update(JSON.stringify(row)).digest('hex');
-                const isTimestamp = dayjs(row[propsValue.order_by]).isValid();
-                const orderValue = isTimestamp ? dayjs(row[propsValue.order_by]).toISOString() : row[propsValue.order_by];
+                const rawValue = row[propsValue.order_by];
+                const isTimestamp = typeof rawValue === 'string' && dayjs(rawValue).isValid();
+                const orderValue = isTimestamp ? dayjs(rawValue).toISOString() : rawValue;
                 return {
                     id: orderValue + '|' + rowHash,
                     data: row,
@@ -90,8 +91,9 @@ export const newRow = createTrigger({
                         placeholder: 'Please authenticate first',
                     };
                 }
-                const client = await pgClient(auth)
+                let client;
                 try {
+                    client = await pgClient(auth)
                     const result = await client.query(
                         `SELECT table_schema, table_name FROM information_schema.tables WHERE table_type = 'BASE TABLE'`
                     );
@@ -107,7 +109,9 @@ export const newRow = createTrigger({
                         options,
                     };
                 } finally {
-                    await client.end();
+                    if (client) {
+                        await client.end();
+                    }
                 }
             }
         }),
@@ -133,8 +137,9 @@ export const newRow = createTrigger({
                         placeholder: 'Please select a table',
                     };
                 }
-                const client = await pgClient(auth)
+                let client;
                 try {
+                    client = await pgClient(auth)
                     const { table_name, table_schema } = table as { table_schema: string, table_name: string };
                     const query = `
                     SELECT column_name
@@ -156,7 +161,9 @@ export const newRow = createTrigger({
                         options,
                     };
                 } finally {
-                    await client.end();
+                    if (client) {
+                        await client.end();
+                    }
                 }
             }
         }),
