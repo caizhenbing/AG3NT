@@ -14,7 +14,7 @@ Usage:
 
     # In a tool function:
     async with StreamingContext(session_id, "read_file") as ctx:
-        ctx.emit_progress("Reading file...", progress=0.5)
+        await ctx.emit_progress("Reading file...", progress=0.5)
         result = do_work()
         return result  # tool_end emitted automatically
 """
@@ -25,6 +25,7 @@ import asyncio
 import logging
 import time
 import uuid
+from collections.abc import Coroutine
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
@@ -95,11 +96,11 @@ class StreamManager:
         """Reset the singleton (for testing)."""
         cls._instance = None
 
-    def subscribe(
+    async def subscribe(
         self,
         session_id: str,
         callback: Callable[[ToolEvent], None],
-    ) -> Callable[[], None]:
+    ) -> Callable[[], Coroutine[Any, Any, None]]:
         """Subscribe to events for a session.
 
         Args:
@@ -107,61 +108,64 @@ class StreamManager:
             callback: Function called for each event
 
         Returns:
-            Unsubscribe function
+            Async unsubscribe function
         """
-        if session_id not in self._subscribers:
-            self._subscribers[session_id] = []
+        async with self._lock:
+            if session_id not in self._subscribers:
+                self._subscribers[session_id] = []
 
-        self._subscribers[session_id].append(callback)
-        logger.debug(f"Subscribed to session {session_id[:16]}...")
+            self._subscribers[session_id].append(callback)
+            logger.debug(f"Subscribed to session {session_id[:16]}...")
 
-        # Send any buffered events
-        if session_id in self._event_buffer:
-            for event in self._event_buffer[session_id]:
-                try:
-                    callback(event)
-                except Exception as e:
-                    logger.error(f"Error sending buffered event: {e}")
-            # Clear buffer after sending
-            del self._event_buffer[session_id]
+            # Send any buffered events
+            if session_id in self._event_buffer:
+                for event in self._event_buffer[session_id]:
+                    try:
+                        callback(event)
+                    except Exception as e:
+                        logger.error(f"Error sending buffered event: {e}")
+                # Clear buffer after sending
+                del self._event_buffer[session_id]
 
-        def unsubscribe() -> None:
-            if session_id in self._subscribers:
-                try:
-                    self._subscribers[session_id].remove(callback)
-                    if not self._subscribers[session_id]:
-                        del self._subscribers[session_id]
-                except ValueError:
-                    pass
-            logger.debug(f"Unsubscribed from session {session_id[:16]}...")
+        async def unsubscribe() -> None:
+            async with self._lock:
+                if session_id in self._subscribers:
+                    try:
+                        self._subscribers[session_id].remove(callback)
+                        if not self._subscribers[session_id]:
+                            del self._subscribers[session_id]
+                    except ValueError:
+                        pass
+                logger.debug(f"Unsubscribed from session {session_id[:16]}...")
 
         return unsubscribe
 
-    def emit(self, event: ToolEvent) -> None:
+    async def emit(self, event: ToolEvent) -> None:
         """Emit an event to all subscribers.
 
         If no subscribers, buffers the event for later delivery.
         """
-        session_id = event.session_id
+        async with self._lock:
+            session_id = event.session_id
 
-        if session_id in self._subscribers:
-            for callback in self._subscribers[session_id]:
-                try:
-                    callback(event)
-                except Exception as e:
-                    logger.error(f"Error in event callback: {e}")
-        else:
-            # Buffer event for later delivery
-            if session_id not in self._event_buffer:
-                self._event_buffer[session_id] = []
+            if session_id in self._subscribers:
+                for callback in self._subscribers[session_id]:
+                    try:
+                        callback(event)
+                    except Exception as e:
+                        logger.error(f"Error in event callback: {e}")
+            else:
+                # Buffer event for later delivery
+                if session_id not in self._event_buffer:
+                    self._event_buffer[session_id] = []
 
-            self._event_buffer[session_id].append(event)
+                self._event_buffer[session_id].append(event)
 
-            # Trim buffer if too large
-            if len(self._event_buffer[session_id]) > self._buffer_max_size:
-                self._event_buffer[session_id] = self._event_buffer[session_id][
-                    -self._buffer_max_size :
-                ]
+                # Trim buffer if too large
+                if len(self._event_buffer[session_id]) > self._buffer_max_size:
+                    self._event_buffer[session_id] = self._event_buffer[session_id][
+                        -self._buffer_max_size :
+                    ]
 
         logger.debug(
             f"Event {event.event_type.value} for {event.tool_name} "
@@ -183,13 +187,13 @@ def get_stream_manager() -> StreamManager:
 
 
 class StreamingContext:
-    """Context manager for streaming tool execution.
+    """Async context manager for streaming tool execution.
 
     Automatically emits tool_start and tool_end/tool_error events.
 
     Usage:
         async with StreamingContext(session_id, "my_tool", tool_call_id) as ctx:
-            ctx.emit_progress("Working...", progress=0.5)
+            await ctx.emit_progress("Working...", progress=0.5)
             return result
     """
 
@@ -207,9 +211,9 @@ class StreamingContext:
         self._manager = get_stream_manager()
         self._start_time = 0.0
 
-    def __enter__(self) -> StreamingContext:
+    async def __aenter__(self) -> StreamingContext:
         self._start_time = time.time()
-        self._manager.emit(
+        await self._manager.emit(
             ToolEvent(
                 event_type=EventType.TOOL_START,
                 session_id=self.session_id,
@@ -220,12 +224,12 @@ class StreamingContext:
         )
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:
         duration_ms = int((time.time() - self._start_time) * 1000)
 
         if exc_type is not None:
             # Error occurred
-            self._manager.emit(
+            await self._manager.emit(
                 ToolEvent(
                     event_type=EventType.TOOL_ERROR,
                     session_id=self.session_id,
@@ -240,7 +244,7 @@ class StreamingContext:
             )
         else:
             # Success
-            self._manager.emit(
+            await self._manager.emit(
                 ToolEvent(
                     event_type=EventType.TOOL_END,
                     session_id=self.session_id,
@@ -252,13 +256,7 @@ class StreamingContext:
 
         return False  # Don't suppress exceptions
 
-    async def __aenter__(self) -> StreamingContext:
-        return self.__enter__()
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:
-        return self.__exit__(exc_type, exc_val, exc_tb)
-
-    def emit_progress(
+    async def emit_progress(
         self,
         message: str,
         progress: float | None = None,
@@ -277,7 +275,7 @@ class StreamingContext:
         if data:
             event_data.update(data)
 
-        self._manager.emit(
+        await self._manager.emit(
             ToolEvent(
                 event_type=EventType.TOOL_PROGRESS,
                 session_id=self.session_id,
@@ -287,7 +285,7 @@ class StreamingContext:
             )
         )
 
-    def emit_result_preview(
+    async def emit_result_preview(
         self,
         preview: str,
         total_size: int | None = None,
@@ -298,7 +296,7 @@ class StreamingContext:
             preview: Truncated preview of result
             total_size: Total size of full result
         """
-        self.emit_progress(
+        await self.emit_progress(
             "Result preview",
             data={
                 "preview": preview,
@@ -320,7 +318,7 @@ class StreamingContext:
         return truncated
 
 
-def emit_tool_event(
+async def emit_tool_event(
     session_id: str,
     tool_name: str,
     tool_call_id: str,
@@ -336,7 +334,7 @@ def emit_tool_event(
         event_type: Type of event
         data: Additional event data
     """
-    get_stream_manager().emit(
+    await get_stream_manager().emit(
         ToolEvent(
             event_type=event_type,
             session_id=session_id,

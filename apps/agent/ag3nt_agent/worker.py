@@ -555,7 +555,7 @@ async def _process_turn_ws(
             except Exception as e:
                 ws_logger.debug(f"Failed to send stream event: {e}")
 
-        unsubscribe = stream_manager.subscribe(session_id, on_tool_event)
+        unsubscribe = await stream_manager.subscribe(session_id, on_tool_event)
 
         # Track session -> websocket for this turn
         with _ws_lock:
@@ -608,7 +608,7 @@ async def _process_turn_ws(
     finally:
         # Clean up streaming subscription
         if unsubscribe:
-            unsubscribe()
+            await unsubscribe()
         with _ws_lock:
             _session_websockets.pop(session_id, None)
 
