@@ -178,8 +178,9 @@ export const askAI = createAction({
 
     let conversation = null;
     if (conversationKey) {
-      conversation = (await storage.get<ModelMessage[]>(conversationKey)) ?? [];
+      conversation = await storage.get<ModelMessage[]>(conversationKey);
       if (!conversation) {
+        conversation = [];
         await storage.put(conversationKey, { messages: [] });
       }
     }
