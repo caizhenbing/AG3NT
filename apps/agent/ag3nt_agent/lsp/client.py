@@ -39,6 +39,7 @@ class LspClient:
         self._diagnostics: dict[str, list[dict]] = {}
         self._diagnostics_event: dict[str, asyncio.Event] = {}
         self._running: bool = False
+        self._background_tasks: set[asyncio.Task[None]] = set()
 
     # ------------------------------------------------------------------
     # Properties
@@ -69,9 +70,13 @@ class LspClient:
             )
         except FileNotFoundError:
             logger.error("LSP server binary not found: %s", self._command[0])
+            self._process = None
+            self._running = False
             return
         except OSError as exc:
             logger.error("Failed to start LSP server: %s", exc)
+            self._process = None
+            self._running = False
             return
 
         self._running = True
@@ -314,10 +319,20 @@ class LspClient:
             if self._process and self._process.stdin:
                 data = self._encode_message(response)
                 self._process.stdin.write(data)
-                # drain is a coroutine — schedule it on the loop
+                # drain is a coroutine — schedule it on the loop.
+                # Keep a strong reference to prevent GC before completion.
                 try:
                     loop = asyncio.get_running_loop()
-                    loop.create_task(self._process.stdin.drain())
+                    stdin = self._process.stdin
+
+                    async def _guarded_drain() -> None:
+                        if not self._running:
+                            return
+                        await stdin.drain()
+
+                    task = loop.create_task(_guarded_drain())
+                    self._background_tasks.add(task)
+                    task.add_done_callback(self._background_tasks.discard)
                 except RuntimeError:
                     pass
 
