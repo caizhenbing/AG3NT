@@ -435,14 +435,14 @@ class SubagentMonitor:
             try:
                 cb(event)
             except Exception:
-                pass  # Don't let callback errors break execution
+                logger.error("Error in event callback %s for %s", cb, event_type, exc_info=True)
 
         # Call global callbacks
         for cb in global_callbacks:
             try:
                 cb(event)
             except Exception:
-                pass
+                logger.error("Error in global event callback %s for %s", cb, event_type, exc_info=True)
 
         return event
 
