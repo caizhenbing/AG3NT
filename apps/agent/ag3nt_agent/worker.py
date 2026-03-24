@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import asyncio
+import hmac
 import json
 import logging
 import os
@@ -138,7 +139,7 @@ async def verify_gateway_token(request: Request, call_next):
     """Verify X-Gateway-Token header on /turn and /resume endpoints."""
     if GATEWAY_TOKEN and request.url.path in ("/turn", "/resume"):
         token = request.headers.get("X-Gateway-Token", "")
-        if token != GATEWAY_TOKEN:
+        if not hmac.compare_digest(token, GATEWAY_TOKEN):
             from fastapi.responses import JSONResponse
             return JSONResponse(
                 status_code=403,
@@ -533,6 +534,7 @@ async def _process_turn_ws(
 
     start_time = time.time()
     unsubscribe = None
+    loop = asyncio.get_running_loop()
 
     try:
         # Set up streaming: forward tool events to WebSocket
@@ -541,13 +543,14 @@ async def _process_turn_ws(
         def on_tool_event(event: ToolEvent) -> None:
             """Forward tool events to WebSocket."""
             try:
-                # Use asyncio to send from sync callback
-                asyncio.create_task(
+                # Use thread-safe call since this callback runs in a thread-pool thread
+                asyncio.run_coroutine_threadsafe(
                     ws.send_json({
                         "type": "stream",
                         "request_id": request_id,
                         "event": event.to_dict(),
-                    })
+                    }),
+                    loop,
                 )
             except Exception as e:
                 ws_logger.debug(f"Failed to send stream event: {e}")
@@ -684,7 +687,7 @@ async def websocket_endpoint(websocket: WebSocket):
         # Try query param as fallback (for browser testing)
         token = websocket.query_params.get("token", "")
 
-    if GATEWAY_TOKEN and token != GATEWAY_TOKEN:
+    if GATEWAY_TOKEN and not hmac.compare_digest(token, GATEWAY_TOKEN):
         ws_logger.warning("WebSocket connection rejected: invalid token")
         await websocket.close(code=4001, reason="Invalid or missing gateway token")
         return
