@@ -13,7 +13,7 @@ Key features:
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from ..context_engine_client import (
@@ -35,7 +35,7 @@ class ActionRecord:
     context: str
     success: bool
     duration_ms: int
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     error_message: Optional[str] = None
     metadata: dict = field(default_factory=dict)
 
@@ -266,7 +266,7 @@ class LearningEngine:
         last_success = None
         last_failure = None
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         for result in results:
             metadata = result.metadata
@@ -410,7 +410,7 @@ class LearningEngine:
             return {"error": "Failed to retrieve action history"}
 
         # Filter by date
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         recent = []
 
         for result in results:
@@ -465,7 +465,7 @@ class LearningEngine:
         """Get cached confidence score if not expired."""
         if key in self._cache:
             cached_at = self._cache_timestamps.get(key)
-            if cached_at and datetime.utcnow() - cached_at < self._cache_ttl:
+            if cached_at and datetime.now(timezone.utc) - cached_at < self._cache_ttl:
                 return self._cache[key]
             else:
                 # Expired, remove from cache
@@ -476,7 +476,7 @@ class LearningEngine:
     def _set_cached(self, key: str, score: ConfidenceScore):
         """Cache a confidence score."""
         self._cache[key] = score
-        self._cache_timestamps[key] = datetime.utcnow()
+        self._cache_timestamps[key] = datetime.now(timezone.utc)
 
     def _invalidate_cache(self, action_type: str):
         """Invalidate cache entries for an action type."""
