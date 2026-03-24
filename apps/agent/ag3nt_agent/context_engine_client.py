@@ -68,7 +68,7 @@ class ContextEngineError(Exception):
     pass
 
 
-class ConnectionError(ContextEngineError):
+class ContextEngineConnectionError(ContextEngineError):
     """Failed to connect to Context-Engine server."""
     pass
 
@@ -227,7 +227,7 @@ class ContextEngineClient:
             raise ToolCallError(f"HTTP error: {e}") from e
         except httpx.RequestError as e:
             logger.error(f"Request error calling {tool_name}: {e}")
-            raise ConnectionError(f"Connection error: {e}") from e
+            raise ContextEngineConnectionError(f"Connection error: {e}") from e
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON response from {tool_name}: {e}")
             raise ToolCallError(f"Invalid response: {e}") from e

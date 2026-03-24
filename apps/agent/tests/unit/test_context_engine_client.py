@@ -12,7 +12,7 @@ from ag3nt_agent.context_engine_client import (
     CodeSearchResult,
     ContextEngineError,
     ToolCallError,
-    ConnectionError,
+    ContextEngineConnectionError,
     get_context_engine,
     init_context_engine,
 )
