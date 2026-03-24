@@ -10,10 +10,16 @@
  * Usage:
  *   GET /api/stream/:sessionId
  *   Accept: text/event-stream
+ *
+ * Authorization:
+ *   - Per-session streams require a valid, existing session (looked up via SessionManager).
+ *   - The all-events monitoring endpoint requires an admin token (AG3NT_ADMIN_TOKEN).
  */
 
 import { Router, Request, Response } from "express";
 import { EventEmitter } from "events";
+import { timingSafeEqual } from "crypto";
+import type { SessionManager } from "../session/SessionManager.js";
 
 // Global event bus for tool events
 export const toolEventBus = new EventEmitter();
@@ -53,16 +59,50 @@ export function forwardStreamEvent(msg: StreamMessage): void {
 }
 
 /**
- * Create the stream router.
+ * Perform a timing-safe comparison of two token strings.
+ * Returns false if either token is empty or they differ in length/content.
  */
-export function createStreamRouter(): Router {
+function safeTokenCompare(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  const bufA = Buffer.from(a, "utf-8");
+  const bufB = Buffer.from(b, "utf-8");
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
+
+/**
+ * Create the stream router.
+ *
+ * @param sessionManager - Used to verify session existence and ownership
+ *   for per-session stream subscriptions.
+ */
+export function createStreamRouter(sessionManager: SessionManager): Router {
   const router = Router();
+
+  /** Admin token for the all-events monitoring endpoint. */
+  const adminToken = process.env.AG3NT_ADMIN_TOKEN || "";
 
   /**
    * SSE endpoint for subscribing to tool events for a session.
+   *
+   * Authorization: the requested session must exist in the SessionManager.
+   * This ensures only sessions created through the authenticated gateway
+   * flow can be subscribed to — the session ID acts as a capability token.
    */
   router.get("/:sessionId", (req: Request, res: Response) => {
     const { sessionId } = req.params;
+
+    // --- Authorization: verify the session exists ---
+    const session = sessionManager.getSession(sessionId);
+    if (!session) {
+      res.status(403).json({
+        ok: false,
+        error: "Forbidden",
+        code: "GW-STREAM-001",
+        message: "Session not found or access denied",
+      });
+      return;
+    }
 
     // Set SSE headers
     res.setHeader("Content-Type", "text/event-stream");
@@ -104,8 +144,35 @@ export function createStreamRouter(): Router {
 
   /**
    * SSE endpoint for subscribing to all tool events (for monitoring).
+   *
+   * Authorization: requires a valid admin token via the X-Admin-Token header.
+   * The token is compared using crypto.timingSafeEqual to prevent timing attacks.
    */
   router.get("/", (req: Request, res: Response) => {
+    // --- Authorization: require admin token ---
+    if (!adminToken) {
+      // Admin token not configured — endpoint disabled
+      res.status(403).json({
+        ok: false,
+        error: "Forbidden",
+        code: "GW-STREAM-002",
+        message: "All-events stream is disabled (no admin token configured)",
+      });
+      return;
+    }
+
+    const provided = (req.headers["x-admin-token"] as string) || "";
+
+    if (!safeTokenCompare(provided, adminToken)) {
+      res.status(403).json({
+        ok: false,
+        error: "Forbidden",
+        code: "GW-STREAM-003",
+        message: "Invalid or missing admin token",
+      });
+      return;
+    }
+
     // Set SSE headers
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
