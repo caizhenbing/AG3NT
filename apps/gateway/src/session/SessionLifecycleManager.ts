@@ -95,12 +95,18 @@ export class SessionLifecycleManager extends EventEmitter {
   cleanupExpiredSessions(): number {
     const now = Date.now();
     const sessions = this.sessionManager.listSessions();
+
+    // Snapshot expired session IDs before iterating to avoid
+    // mutating the underlying collection during iteration.
+    const expiredIds = sessions
+      .filter(session => now - session.lastActivityAt.getTime() > this.config.sessionTimeout)
+      .map(session => session.id);
+
     let cleaned = 0;
 
-    for (const session of sessions) {
-      const inactiveTime = now - session.lastActivityAt.getTime();
-      if (inactiveTime > this.config.sessionTimeout) {
-        this.destroySession(session.id);
+    for (const sessionId of expiredIds) {
+      const destroyed = this.destroySession(sessionId);
+      if (destroyed) {
         cleaned++;
       }
     }
