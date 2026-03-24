@@ -163,7 +163,8 @@ class AgentPool:
         async def build_one(index: int) -> PoolEntry | None:
             try:
                 agent = await loop.run_in_executor(None, self._build_agent)
-                self._stats.warmups_completed += 1
+                with self._lock:
+                    self._stats.warmups_completed += 1
                 logger.debug(f"Warmed agent {index + 1}/{self.pool_size}")
                 return PoolEntry(agent=agent)
             except Exception as e:
