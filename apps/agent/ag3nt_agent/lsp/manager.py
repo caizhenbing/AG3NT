@@ -47,7 +47,7 @@ class LspManager:
         self._opened_files: set[str] = set()
         # Guards concurrent start attempts for the same language
         self._start_locks: dict[str, asyncio.Lock] = {}
-        # Meta-lock protecting creation of per-key locks in _start_locks
+        # Meta-lock protects creation of per-key locks in _ensure_lock
         self._meta_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------

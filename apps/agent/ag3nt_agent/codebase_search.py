@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import re
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -553,6 +554,14 @@ class CodebaseIndex:
         except ImportError as e:
             logger.warning("Codebase indexing unavailable (missing dependency): %s", e)
             return False
+        except (ValueError, OSError) as e:
+            logger.warning("Codebase indexing failed (build error): %s", e)
+            self._index = None
+            return False
+        except Exception as e:
+            logger.error("Codebase indexing failed (unexpected error): %s", e)
+            self._index = None
+            return False
         return self._index is not None
 
     def search(self, query: str, top_k: int = DEFAULT_TOP_K) -> list[dict]:
@@ -587,13 +596,17 @@ class CodebaseIndex:
 
 # Cache of indexes by root path
 _indexes: dict[str, CodebaseIndex] = {}
+_indexes_lock = threading.Lock()
 
 
 def _get_index(root_path: Path) -> CodebaseIndex:
     """Get or create index for a root path."""
     key = str(root_path)
     if key not in _indexes:
-        _indexes[key] = CodebaseIndex(root_path)
+        with _indexes_lock:
+            # Double-check after acquiring lock to avoid duplicate builds
+            if key not in _indexes:
+                _indexes[key] = CodebaseIndex(root_path)
     return _indexes[key]
 
 

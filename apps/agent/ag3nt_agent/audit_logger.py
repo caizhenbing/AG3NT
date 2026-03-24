@@ -290,12 +290,17 @@ class AuditLogger:
 
 # Global audit logger instance
 _audit_logger: AuditLogger | None = None
+_audit_lock = threading.Lock()
 
 
 def get_audit_logger() -> AuditLogger:
     """Get or create the global audit logger instance."""
     global _audit_logger
-    if _audit_logger is None:
+    if _audit_logger is not None:
+        return _audit_logger
+    with _audit_lock:
+        if _audit_logger is not None:
+            return _audit_logger
         _audit_logger = AuditLogger()
-    return _audit_logger
+        return _audit_logger
 
