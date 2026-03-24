@@ -434,14 +434,14 @@ class SubagentMonitor:
         for cb in type_callbacks:
             try:
                 cb(event)
-            except (TypeError, ValueError, RuntimeError):
+            except Exception:
                 pass  # Don't let callback errors break execution
 
         # Call global callbacks
         for cb in global_callbacks:
             try:
                 cb(event)
-            except (TypeError, ValueError, RuntimeError):
+            except Exception:
                 pass
 
         return event
