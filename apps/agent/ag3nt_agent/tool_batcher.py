@@ -107,6 +107,7 @@ class ToolBatcher:
 
         self._pending: dict[str, list[PendingCall]] = defaultdict(list)
         self._batch_tasks: dict[str, asyncio.Task[None]] = {}
+        self._tool_fns: dict[str, Callable[..., Any] | Callable[..., Awaitable[Any]]] = {}
         self._lock = asyncio.Lock()
         self._stats = BatchStats()
         self._stats_lock = threading.Lock()
@@ -142,6 +143,7 @@ class ToolBatcher:
 
         async with self._lock:
             self._pending[tool_name].append(call)
+            self._tool_fns[tool_name] = tool_fn
             with self._stats_lock:
                 self._stats.batched_calls += 1
 
@@ -184,25 +186,9 @@ class ToolBatcher:
         async with self._lock:
             batch = self._pending.pop(tool_name, [])
             self._batch_tasks.pop(tool_name, None)
+            self._tool_fns.pop(tool_name, None)
 
-        if not batch:
-            return
-
-        with self._stats_lock:
-            self._stats.batches_executed += 1
-            self._stats.total_batch_size += len(batch)
-
-        logger.debug(f"Executing batch of {len(batch)} {tool_name} calls")
-
-        # Execute all in parallel
-        tasks = [
-            asyncio.create_task(
-                self._execute_and_resolve(tool_fn, call.args, call.future)
-            )
-            for call in batch
-        ]
-
-        await asyncio.gather(*tasks, return_exceptions=True)
+        await self._execute_batch_calls(tool_name, batch, tool_fn)
 
     async def _execute_and_resolve(
         self,
@@ -248,16 +234,72 @@ class ToolBatcher:
                 errors=self._stats.errors,
             )
 
+    async def _execute_batch_calls(
+        self,
+        tool_name: str,
+        batch: list[PendingCall],
+        tool_fn: Callable[..., Any] | Callable[..., Awaitable[Any]],
+    ) -> None:
+        """Execute a list of pending calls and resolve their futures.
+
+        This is the core batch execution logic used by both normal batch
+        processing and flush(). It runs all calls in parallel and resolves
+        each caller's Future with the result or exception.
+
+        Args:
+            tool_name: The tool type name (for logging).
+            batch: The pending calls to execute.
+            tool_fn: The tool function to invoke for each call.
+        """
+        if not batch:
+            return
+
+        with self._stats_lock:
+            self._stats.batches_executed += 1
+            self._stats.total_batch_size += len(batch)
+
+        logger.debug(f"Executing batch of {len(batch)} {tool_name} calls")
+
+        tasks = [
+            asyncio.create_task(
+                self._execute_and_resolve(tool_fn, call.args, call.future)
+            )
+            for call in batch
+        ]
+        await asyncio.gather(*tasks, return_exceptions=True)
+
     async def flush(self) -> None:
-        """Flush all pending batches immediately."""
+        """Flush all pending batches immediately.
+
+        Snapshots all pending calls, cancels batch timers, and executes
+        all pending calls via _execute_batch_calls() to resolve every
+        Future. Callers will never hang after flush() returns.
+        """
         async with self._lock:
-            # Cancel all batch timers
+            # Snapshot pending calls and their tool functions
+            pending_snapshot: dict[str, list[PendingCall]] = dict(self._pending)
+            tool_fns_snapshot: dict[
+                str, Callable[..., Any] | Callable[..., Awaitable[Any]]
+            ] = dict(self._tool_fns)
+            self._pending.clear()
+            self._tool_fns.clear()
+
+            # Cancel all batch timers so they don't also try to execute
             for task in self._batch_tasks.values():
                 task.cancel()
             self._batch_tasks.clear()
 
-            # Note: Pending calls will have their futures resolved
-            # when their batch tasks complete or get cancelled
+        # Outside the lock, execute all pending calls to resolve futures
+        for tool_name, batch in pending_snapshot.items():
+            tool_fn = tool_fns_snapshot.get(tool_name)
+            if tool_fn is not None:
+                await self._execute_batch_calls(tool_name, batch, tool_fn)
+            else:
+                # Defensive: no tool_fn stored (should not happen), cancel
+                # futures so callers get CancelledError instead of hanging
+                for call in batch:
+                    if not call.future.done():
+                        call.future.cancel()
 
 
 # Global batcher instance
