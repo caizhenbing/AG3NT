@@ -937,7 +937,15 @@ Generate ONLY the commit message (first line only), nothing else. Do not include
             )
 
         # Get current branch
-        result = self._run(["rev-parse", "--abbrev-ref", "HEAD"])
+        result = self._run(["rev-parse", "--abbrev-ref", "HEAD"], check=False)
+        if result.returncode != 0:
+            return GitResult(
+                operation="create_pull_request",
+                success=False,
+                output="",
+                error="Cannot create PR: failed to determine current branch "
+                f"(detached HEAD or invalid state). git error: {result.stderr.strip()}",
+            )
         current_branch = result.stdout.strip()
 
         if current_branch == base:
