@@ -79,6 +79,7 @@ class LogMonitor:
 
         # File tracking
         self._file_positions: dict[str, int] = {}
+        self._file_line_counts: dict[str, int] = {}
 
         # Match tracking for threshold detection
         self._recent_matches: dict[str, deque] = {}
@@ -158,6 +159,7 @@ class LogMonitor:
         config = self._configs[config_id]
         del self._configs[config_id]
         self._file_positions.pop(config.path, None)
+        self._file_line_counts.pop(config.path, None)
         self._recent_matches.pop(config_id, None)
         self._compiled_patterns.pop(config_id, None)
 
@@ -169,8 +171,14 @@ class LogMonitor:
         path = Path(config.path)
         if path.exists():
             self._file_positions[config.path] = path.stat().st_size
+            try:
+                with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                    self._file_line_counts[config.path] = sum(1 for _ in f)
+            except (IOError, OSError):
+                self._file_line_counts[config.path] = 0
         else:
             self._file_positions[config.path] = 0
+            self._file_line_counts[config.path] = 0
 
     async def _poll_loop(self):
         """Main polling loop."""
@@ -200,35 +208,44 @@ class LogMonitor:
         if not path.exists():
             return
 
-        current_size = path.stat().st_size
+        try:
+            current_size = path.stat().st_size
+        except (IOError, OSError) as e:
+            logger.warning(f"Could not stat {config.path}: {e}")
+            return
+
         last_position = self._file_positions.get(config.path, 0)
 
         # Handle log rotation (file got smaller)
         if current_size < last_position:
             last_position = 0
+            self._file_line_counts[config.path] = 0
 
         # No new content
         if current_size == last_position:
             return
 
-        # Read new content
+        # Read new content from last known position
         try:
             with open(path, 'r', encoding='utf-8', errors='replace') as f:
                 f.seek(last_position)
                 new_content = f.read()
                 self._file_positions[config.path] = f.tell()
 
-        except IOError as e:
+        except (IOError, OSError) as e:
             logger.warning(f"Could not read {config.path}: {e}")
+            # Reset position so next poll retries from the start
+            self._file_positions[config.path] = 0
+            self._file_line_counts[config.path] = 0
             return
 
-        # Process new lines
-        line_number = sum(1 for _ in open(path, 'r', encoding='utf-8', errors='replace'))
-        lines_read = 0
+        # Process new lines using tracked line count (no file re-read)
+        start_line = self._file_line_counts.get(config.path, 0)
+        new_lines = new_content.splitlines()
+        for i, line in enumerate(new_lines, start=1):
+            await self._check_line(config, line, start_line + i)
 
-        for line in new_content.splitlines():
-            lines_read += 1
-            await self._check_line(config, line, line_number - len(new_content.splitlines()) + lines_read)
+        self._file_line_counts[config.path] = start_line + len(new_lines)
 
     async def _check_line(self, config: LogMonitorConfig, line: str, line_number: int):
         """Check a single line against patterns."""
