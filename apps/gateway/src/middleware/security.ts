@@ -168,8 +168,10 @@ export function createRequestIdMiddleware(): RequestHandler {
   let counter = 0;
 
   return (req: Request, res: Response, next: NextFunction): void => {
-    const requestId = req.headers['x-request-id'] as string ||
-                      `gw-${Date.now()}-${++counter}`;
+    const rawRequestId = req.headers['x-request-id'] as string ||
+                         `gw-${Date.now()}-${++counter}`;
+    // Sanitize request ID to prevent CRLF injection / header splitting
+    const requestId = rawRequestId.replace(/[\r\n\0]/g, '');
     (req as any).requestId = requestId;
     res.setHeader('X-Request-ID', requestId);
     next();
