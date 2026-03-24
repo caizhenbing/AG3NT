@@ -239,7 +239,7 @@ class Goal:
         if self._last_triggered:
             cooldown_end = self._last_triggered + timedelta(seconds=self.trigger.cooldown_seconds)
             if now < cooldown_end:
-                remaining = (cooldown_end - now).seconds
+                remaining = int((cooldown_end - now).total_seconds())
                 return False, f"Cooldown active ({remaining}s remaining)"
 
         # Reset hourly counter if needed
