@@ -67,7 +67,7 @@ export const amazons3UploadFile = createAction({
 
     const s3 = createS3(context.auth.props);
 
-    let contentType, extension = null
+    let contentType: string | null = null, extension: string | null = null
 
     if(!type) {
       if (!file.extension || file.extension === undefined || !mime.contentType(file.extension)) {
