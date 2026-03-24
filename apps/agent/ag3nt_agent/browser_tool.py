@@ -15,12 +15,41 @@ import os as _os
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Optional, Literal
 from langchain_core.tools import tool
 
 logger = logging.getLogger("ag3nt.browser")
+
+
+# ---------------------------------------------------------------------------
+# Path containment — prevent writes to arbitrary filesystem locations (BUG-0079)
+# ---------------------------------------------------------------------------
+
+_ALLOWED_SAVE_DIRS: tuple[str, ...] = (
+    _os.path.realpath(_os.getcwd()),
+    _os.path.realpath(tempfile.gettempdir()),
+    _os.path.realpath(_os.path.join(_os.path.expanduser("~"), ".ag3nt")),
+)
+
+
+def _validate_save_path(save_path: str) -> str:
+    """Resolve *save_path* and ensure it falls within an allowed directory.
+
+    Returns the resolved absolute path on success.
+    Raises ``ValueError`` if the path escapes all allowed directories.
+    """
+    resolved = _os.path.realpath(save_path)
+    for allowed in _ALLOWED_SAVE_DIRS:
+        # Use os.sep to ensure we match a real directory boundary
+        if resolved == allowed or resolved.startswith(allowed + _os.sep):
+            return resolved
+    raise ValueError(
+        f"save_path '{save_path}' resolves to '{resolved}' which is outside "
+        f"allowed directories: {_ALLOWED_SAVE_DIRS}"
+    )
 
 # ---------------------------------------------------------------------------
 # Async helper: safely run coroutines from sync context inside an existing
@@ -365,17 +394,22 @@ def browser_screenshot(full_page: bool = False, save_path: Optional[str] = None)
         browser_screenshot(full_page=True, save_path="page.png")
     """
     async def _screenshot():
+        # Validate save_path before any I/O (BUG-0079)
+        validated_path = None
+        if save_path:
+            validated_path = _validate_save_path(save_path)
+
         bridge = await _try_bridge()
         if bridge:
-            return await bridge.screenshot(save_path=save_path)
+            return await bridge.screenshot(save_path=validated_path)
 
         page = await _get_browser()
         screenshot_bytes = await page.screenshot(full_page=full_page, type="png")
 
-        if save_path:
-            with open(save_path, "wb") as f:
+        if validated_path:
+            with open(validated_path, "wb") as f:
                 f.write(screenshot_bytes)
-            return f"Screenshot saved to: {save_path}"
+            return f"Screenshot saved to: {validated_path}"
         else:
             b64_data = base64.b64encode(screenshot_bytes).decode()
             return f"Screenshot captured (base64): {b64_data[:100]}... ({len(b64_data)} chars total)"
@@ -502,7 +536,24 @@ def browser_wait_for(selector: str, state: Literal["attached", "detached", "visi
         browser_wait_for(".loading-spinner", state="hidden")
     """
     async def _wait():
-        # wait_for is not supported via bridge — always use standalone
+        bridge = await _try_bridge()
+        if bridge:
+            # Route through the bridge so we wait on the live browser page,
+            # not the standalone headless instance (BUG-0078).
+            resp = await bridge._request(
+                "wait_for_selector",
+                {
+                    "type": "wait_for_selector",
+                    "selector": selector,
+                    "state": state,
+                    "timeout": timeout,
+                },
+                timeout=max(timeout / 1000 + 5, 15),
+            )
+            if resp.get("type") == "error":
+                return f"Error waiting for {selector}: {resp.get('message', 'unknown')}"
+            return f"Element '{selector}' reached state: {state}"
+
         page = await _get_browser()
         await page.wait_for_selector(selector, state=state, timeout=timeout)
         return f"Element '{selector}' reached state: {state}"
