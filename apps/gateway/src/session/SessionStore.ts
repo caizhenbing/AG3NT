@@ -219,9 +219,13 @@ export class SessionStore {
     const serialized = typeof value === 'object' ? JSON.stringify(value) : value;
     const now = new Date().toISOString();
 
-    this.db
+    const result = this.db
       .prepare(`UPDATE sessions SET ${column} = ?, updated_at = ? WHERE id = ?`)
       .run(serialized, now, sessionId);
+
+    if (result.changes === 0) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
   }
 
   close(): void {
