@@ -55,9 +55,9 @@ function constructQuery({ table, order_by, lastItem, order_direction }: { table:
     } else {
         switch (order_direction) {
             case 'ASC':
-                return format(`SELECT * FROM %I.%I WHERE %I <= %L ORDER BY %I ASC`, table.table_schema, table.table_name, order_by, lastOrderKey, order_by);
+                return format(`SELECT * FROM %I.%I WHERE %I < %L ORDER BY %I ASC`, table.table_schema, table.table_name, order_by, lastOrderKey, order_by);
             case 'DESC':
-                return format(`SELECT * FROM %I.%I WHERE %I >= %L ORDER BY %I DESC`, table.table_schema, table.table_name, order_by, lastOrderKey, order_by);
+                return format(`SELECT * FROM %I.%I WHERE %I > %L ORDER BY %I DESC`, table.table_schema, table.table_name, order_by, lastOrderKey, order_by);
             default:
                 throw new Error(JSON.stringify({
                     message: 'Invalid order direction',
