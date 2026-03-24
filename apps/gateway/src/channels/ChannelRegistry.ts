@@ -93,25 +93,50 @@ export class ChannelRegistry {
 
   /**
    * Connect all registered adapters.
+   * Uses Promise.allSettled so a single adapter failure does not prevent
+   * other adapters from connecting. If all adapters fail, throws an
+   * aggregate error. If only some fail, logs warnings and continues.
    */
   async connectAll(): Promise<void> {
-    const connectPromises = Array.from(this.adapters.values()).map(
-      async (adapter) => {
-        try {
-          await adapter.connect();
-          this.emit({ type: "connected", adapterId: adapter.id });
-        } catch (error) {
-          this.emit({
-            type: "error",
-            adapterId: adapter.id,
-            error: error instanceof Error ? error : new Error(String(error)),
-          });
-          throw error;
-        }
-      }
+    const adapterList = Array.from(this.adapters.values());
+    if (adapterList.length === 0) return;
+
+    const results = await Promise.allSettled(
+      adapterList.map(async (adapter) => {
+        await adapter.connect();
+        this.emit({ type: "connected", adapterId: adapter.id });
+        return adapter.id;
+      })
     );
 
-    await Promise.all(connectPromises);
+    const errors: { adapterId: string; error: Error }[] = [];
+
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
+      if (result.status === "rejected") {
+        const adapter = adapterList[i];
+        const error =
+          result.reason instanceof Error
+            ? result.reason
+            : new Error(String(result.reason));
+        errors.push({ adapterId: adapter.id, error });
+        this.emit({ type: "error", adapterId: adapter.id, error });
+      }
+    }
+
+    if (errors.length > 0 && errors.length === adapterList.length) {
+      throw new Error(
+        `All channel adapters failed to connect: ${errors.map((e) => `${e.adapterId} (${e.error.message})`).join(", ")}`
+      );
+    }
+
+    if (errors.length > 0) {
+      for (const { adapterId, error } of errors) {
+        console.warn(
+          `[ChannelRegistry] Adapter "${adapterId}" failed to connect: ${error.message}`
+        );
+      }
+    }
   }
 
   /**
