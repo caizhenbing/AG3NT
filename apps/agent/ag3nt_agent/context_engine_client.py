@@ -12,6 +12,7 @@ via the MCP HTTP protocol.
 
 import os
 import json
+import itertools
 import logging
 from typing import Any, Optional
 from dataclasses import dataclass, field
@@ -151,6 +152,7 @@ class ContextEngineClient:
         )
         self.timeout = timeout
         self._client: Optional[httpx.AsyncClient] = None
+        self._request_id_counter = itertools.count(1)
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create the HTTP client."""
@@ -197,7 +199,7 @@ class ContextEngineClient:
         # MCP tool call request format
         request_body = {
             "jsonrpc": "2.0",
-            "id": 1,
+            "id": next(self._request_id_counter),
             "method": "tools/call",
             "params": {
                 "name": tool_name,
