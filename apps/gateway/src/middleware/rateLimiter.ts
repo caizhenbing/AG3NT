@@ -157,9 +157,11 @@ export function createChatRateLimitMiddleware(config?: Partial<RateLimitConfig>)
 // ─────────────────────────────────────────────────────────────────
 
 function getClientIp(req: Request): string {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string') {
-    return forwarded.split(',')[0].trim();
-  }
-  return req.socket.remoteAddress || 'unknown';
+  // Use req.ip which respects Express's 'trust proxy' setting.
+  // When trust proxy is configured, req.ip safely resolves the client IP
+  // from X-Forwarded-For. When it is NOT configured, req.ip returns the
+  // socket remote address, ignoring the spoofable X-Forwarded-For header.
+  // Never read X-Forwarded-For directly — that allows clients to bypass
+  // rate limiting by sending arbitrary IP values.
+  return req.ip || req.socket.remoteAddress || 'unknown';
 }
