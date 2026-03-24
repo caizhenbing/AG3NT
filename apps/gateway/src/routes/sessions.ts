@@ -169,7 +169,7 @@ export function createSessionRoutes(
     (req: Request<{ id: string }, {}, SendMessageBody>, res: Response) => {
       try {
         const sessionId = decodeURIComponent(req.params.id);
-        const { content, role = 'assistant' } = req.body;
+        const { content, role = 'user' } = req.body;
 
         if (!content || typeof content !== 'string') {
           return res.status(400).json({ error: 'Content is required' });
