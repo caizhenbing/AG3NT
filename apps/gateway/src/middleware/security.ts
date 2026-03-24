@@ -5,6 +5,7 @@
  * and input sanitization.
  */
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
+import { timingSafeEqual } from 'crypto';
 import helmet from 'helmet';
 import cors from 'cors';
 import type { Config } from '../config/schema.js';
@@ -55,6 +56,28 @@ export function createCorsMiddleware(config: Config): RequestHandler {
 // ─────────────────────────────────────────────────────────────────
 
 /**
+ * Timing-safe string comparison. Prevents timing attacks by ensuring
+ * the comparison always takes the same amount of time regardless of
+ * where the first mismatch occurs.
+ *
+ * When lengths differ, the provided value is compared against itself
+ * so the operation still runs in constant time, then returns false.
+ */
+function tsCompareStrings(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'utf-8');
+  const bufB = Buffer.from(b, 'utf-8');
+
+  if (bufA.length !== bufB.length) {
+    // Avoid leaking length information: compare bufA against itself
+    // so the timing is constant, then return false.
+    timingSafeEqual(bufA, bufA);
+    return false;
+  }
+
+  return timingSafeEqual(bufA, bufB);
+}
+
+/**
  * Create API key authentication middleware.
  * If AG3NT_API_KEY env var is set, require it on all /api/* requests.
  * Skips auth for health endpoints.
@@ -86,7 +109,7 @@ export function createApiKeyAuth(): RequestHandler {
     const provided = req.headers['x-api-key'] as string ||
                      req.headers['authorization']?.replace('Bearer ', '');
 
-    if (!provided || provided !== apiKey) {
+    if (!provided || !tsCompareStrings(provided, apiKey)) {
       res.status(401).json({
         ok: false,
         error: 'Unauthorized',
