@@ -171,6 +171,18 @@ class DecisionEngine:
                 f"Too many recent failures ({failure_count})"
             )
 
+        # Check for defer — confidence is marginal and sample count is low,
+        # meaning we should wait for more data before acting or asking
+        defer_ceiling = (self.config.reject_below_confidence + effective_threshold) / 2
+        barely_sufficient_samples = self.config.min_samples_required * 2
+        if (confidence.score < defer_ceiling
+                and confidence.sample_count < barely_sufficient_samples):
+            return self._decide_defer(
+                goal, event, confidence,
+                f"Marginal confidence ({confidence.score:.0%}) with limited samples "
+                f"({confidence.sample_count}), deferring to collect more data"
+            )
+
         # Make the decision
         if confidence.score >= effective_threshold:
             return self._decide_act(
