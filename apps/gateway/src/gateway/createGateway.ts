@@ -566,7 +566,7 @@ export async function createGateway(config: Config): Promise<Gateway> {
 
   // Mount SSE stream routes for real-time tool updates
   const streamModule = await import("../routes/stream.js");
-  const streamRouter = streamModule.createStreamRouter();
+  const streamRouter = streamModule.createStreamRouter(sessionManager);
   const toolEventBus = streamModule.toolEventBus;
   type ToolEvent = import("../routes/stream.js").ToolEvent;
   app.use("/api/stream", streamRouter);

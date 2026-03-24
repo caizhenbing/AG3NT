@@ -44,7 +44,7 @@ export function createCorsMiddleware(config: Config): RequestHandler {
       ? allowedOrigins
       : true,  // Allow all in dev / when not configured
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'X-Request-ID'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'X-Request-ID', 'X-Admin-Token'],
     exposedHeaders: ['X-Request-ID', 'X-RateLimit-Limit', 'X-RateLimit-Remaining'],
     credentials: true,
     maxAge: 86400,
