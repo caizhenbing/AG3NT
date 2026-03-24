@@ -174,6 +174,18 @@ export class SkillsManager {
   }
 
   /**
+   * Validate that a resolved path is contained within the expected base directory.
+   * Prevents path-traversal attacks where skillId contains sequences like "../../".
+   */
+  private assertPathContainment(resolvedPath: string, baseDir: string): void {
+    const normalizedBase = path.resolve(baseDir) + path.sep;
+    const normalizedTarget = path.resolve(resolvedPath);
+    if (!normalizedTarget.startsWith(normalizedBase)) {
+      throw new Error(`Path traversal detected: resolved path escapes skills directory`);
+    }
+  }
+
+  /**
    * Get a skill from a specific path.
    */
   private async getSkillFromPath(
@@ -183,6 +195,9 @@ export class SkillsManager {
   ): Promise<SkillMetadata | null> {
     const skillDir = path.join(skillsPath, skillId);
     const skillMdPath = path.join(skillDir, "SKILL.md");
+
+    // Validate that the resolved path stays within the skills directory
+    this.assertPathContainment(skillMdPath, skillsPath);
 
     if (!fs.existsSync(skillMdPath)) {
       return null;
@@ -243,6 +258,9 @@ export class SkillsManager {
    */
   private getSkillContentFromPath(skillId: string, skillsPath: string): string | null {
     const skillMdPath = path.join(skillsPath, skillId, "SKILL.md");
+
+    // Validate that the resolved path stays within the skills directory
+    this.assertPathContainment(skillMdPath, skillsPath);
 
     if (!fs.existsSync(skillMdPath)) {
       return null;
