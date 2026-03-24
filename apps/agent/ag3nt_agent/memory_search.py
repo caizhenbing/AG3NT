@@ -619,6 +619,7 @@ class MemoryVectorStore:
                             keep_mask[j] = False
                         else:
                             keep_mask[i] = False
+                            self._dedup_stats["removed_by_similarity"] += 1
                             break
                         self._dedup_stats["removed_by_similarity"] += 1
 
