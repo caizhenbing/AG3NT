@@ -14,7 +14,163 @@
 
 import { Router, Request, Response } from "express";
 import { getStateStore, InMemoryStateStore } from "../state/StateStore.js";
-import { createSessionState, type SessionState } from "../state/types.js";
+import {
+  createSessionState,
+  type SessionState,
+  type ActivationMode,
+  type SessionQuotas,
+  type SessionDirective,
+  type PendingApproval,
+} from "../state/types.js";
+
+const VALID_ACTIVATION_MODES: ActivationMode[] = [
+  "always",
+  "mention",
+  "reply",
+  "keyword",
+  "off",
+];
+
+/**
+ * Validate that a value is a non-empty string.
+ */
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+/**
+ * Validate that a value is a string or null.
+ */
+function isStringOrNull(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+/**
+ * Validate SessionQuotas structure.
+ */
+function validateQuotas(quotas: unknown): quotas is SessionQuotas {
+  if (typeof quotas !== "object" || quotas === null || Array.isArray(quotas)) {
+    return false;
+  }
+  const q = quotas as Record<string, unknown>;
+  return (
+    typeof q.maxTokensPerDay === "number" &&
+    typeof q.maxRequestsPerHour === "number" &&
+    typeof q.tokensUsedToday === "number" &&
+    typeof q.requestsThisHour === "number" &&
+    typeof q.quotaResetAt === "string"
+  );
+}
+
+/**
+ * Validate a single SessionDirective.
+ */
+function validateDirective(d: unknown): d is SessionDirective {
+  if (typeof d !== "object" || d === null || Array.isArray(d)) {
+    return false;
+  }
+  const dir = d as Record<string, unknown>;
+  return (
+    typeof dir.id === "string" &&
+    typeof dir.content === "string" &&
+    typeof dir.priority === "number" &&
+    typeof dir.active === "boolean" &&
+    typeof dir.createdAt === "string" &&
+    (dir.expiresAt === undefined || typeof dir.expiresAt === "string")
+  );
+}
+
+/**
+ * Validate a single PendingApproval.
+ */
+function validatePendingApproval(p: unknown): p is PendingApproval {
+  if (typeof p !== "object" || p === null || Array.isArray(p)) {
+    return false;
+  }
+  const pa = p as Record<string, unknown>;
+  return (
+    typeof pa.interruptId === "string" &&
+    typeof pa.toolName === "string" &&
+    typeof pa.args === "object" &&
+    pa.args !== null &&
+    !Array.isArray(pa.args) &&
+    typeof pa.description === "string" &&
+    typeof pa.createdAt === "string"
+  );
+}
+
+/**
+ * Validate all fields of a SessionState body for the PUT handler.
+ * Returns an error message string if invalid, or null if valid.
+ */
+function validateSessionStateBody(body: unknown): string | null {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return "Request body must be a non-null object";
+  }
+
+  const s = body as Record<string, unknown>;
+
+  // Identity fields (required strings)
+  if (!isNonEmptyString(s.sessionId)) return "sessionId must be a non-empty string";
+  if (!isNonEmptyString(s.channelType)) return "channelType must be a non-empty string";
+  if (!isNonEmptyString(s.channelId)) return "channelId must be a non-empty string";
+  if (!isNonEmptyString(s.chatId)) return "chatId must be a non-empty string";
+  if (!isNonEmptyString(s.userId)) return "userId must be a non-empty string";
+  if (s.userName !== undefined && typeof s.userName !== "string") {
+    return "userName must be a string if provided";
+  }
+
+  // Gateway-managed fields
+  if (typeof s.priority !== "number") return "priority must be a number";
+  if (!isStringOrNull(s.assignedAgent)) return "assignedAgent must be a string or null";
+  if (!Array.isArray(s.directives)) return "directives must be an array";
+  for (let i = 0; i < s.directives.length; i++) {
+    if (!validateDirective(s.directives[i])) {
+      return `directives[${i}] has an invalid structure`;
+    }
+  }
+  if (!validateQuotas(s.quotas)) return "quotas must be a valid SessionQuotas object";
+  if (
+    typeof s.activationMode !== "string" ||
+    !VALID_ACTIVATION_MODES.includes(s.activationMode as ActivationMode)
+  ) {
+    return `activationMode must be one of: ${VALID_ACTIVATION_MODES.join(", ")}`;
+  }
+  if (typeof s.paired !== "boolean") return "paired must be a boolean";
+  if (s.pairingCode !== undefined && typeof s.pairingCode !== "string") {
+    return "pairingCode must be a string if provided";
+  }
+
+  // Agent-managed fields
+  if (typeof s.messageCount !== "number") return "messageCount must be a number";
+  if (!isStringOrNull(s.lastTurnAt)) return "lastTurnAt must be a string or null";
+  if (!Array.isArray(s.activeTools)) return "activeTools must be an array";
+  for (let i = 0; i < s.activeTools.length; i++) {
+    if (typeof s.activeTools[i] !== "string") {
+      return `activeTools[${i}] must be a string`;
+    }
+  }
+  if (!Array.isArray(s.pendingApprovals)) return "pendingApprovals must be an array";
+  for (let i = 0; i < s.pendingApprovals.length; i++) {
+    if (!validatePendingApproval(s.pendingApprovals[i])) {
+      return `pendingApprovals[${i}] has an invalid structure`;
+    }
+  }
+
+  // Timestamps
+  if (typeof s.createdAt !== "string") return "createdAt must be a string";
+  if (typeof s.updatedAt !== "string") return "updatedAt must be a string";
+
+  // Metadata
+  if (typeof s.metadata !== "object" || s.metadata === null || Array.isArray(s.metadata)) {
+    return "metadata must be a non-null object";
+  }
+
+  // Version
+  if (typeof s.version !== "number") return "version must be a number";
+
+  return null;
+}
 
 /**
  * Create the state API router.
@@ -102,9 +258,19 @@ export function createStateRouter(): Router {
   router.put("/:sessionId", async (req: Request, res: Response) => {
     try {
       const { sessionId } = req.params;
-      const state = req.body as SessionState;
+      const state = req.body;
 
-      if (!state || state.sessionId !== sessionId) {
+      // Validate all fields of the session state body
+      const validationError = validateSessionStateBody(state);
+      if (validationError) {
+        res.status(400).json({
+          ok: false,
+          error: `Invalid state: ${validationError}`,
+        });
+        return;
+      }
+
+      if (state.sessionId !== sessionId) {
         res.status(400).json({
           ok: false,
           error: "Invalid state: sessionId mismatch",
@@ -113,7 +279,7 @@ export function createStateRouter(): Router {
       }
 
       const store = await getStateStore();
-      await store.setSession(sessionId, state);
+      await store.setSession(sessionId, state as SessionState);
 
       res.json({ ok: true, state });
     } catch (err) {
