@@ -11,7 +11,6 @@ Usage:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from pathlib import Path
 from typing import Any, Literal
@@ -22,7 +21,7 @@ logger = logging.getLogger("ag3nt.lsp.tool")
 
 
 @tool
-def lsp_tool(
+async def lsp_tool(
     action: Literal[
         "definition",
         "references",
@@ -87,15 +86,7 @@ def lsp_tool(
         # Check for compile errors
         lsp_tool(action="diagnostics", file_path="/src/app.py")
     """
-    try:
-        return asyncio.get_event_loop().run_until_complete(
-            _lsp_action(action, file_path, line, character, query)
-        )
-    except RuntimeError:
-        # No event loop running — create one
-        return asyncio.run(
-            _lsp_action(action, file_path, line, character, query)
-        )
+    return await _lsp_action(action, file_path, line, character, query)
 
 
 async def _lsp_action(
