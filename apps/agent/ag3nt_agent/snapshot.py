@@ -172,6 +172,12 @@ class SnapshotManager:
         self._ensure_initialized()
 
         try:
+            # Clear the shadow index to remove stale entries from previous
+            # snapshots.  Without this, files that no longer exist in the
+            # workspace (e.g. partial workspace views) would persist in the
+            # index and pollute the resulting tree object.
+            self._run_git(["read-tree", "--empty"])
+
             # Stage everything in the workspace into the shadow index
             self._run_git(["add", "-A", "--force"])
 
