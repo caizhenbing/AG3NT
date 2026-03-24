@@ -266,17 +266,24 @@ export class Scheduler {
     if (!entry || !entry.job.paused) return false;
 
     // Re-schedule the job
-    const relativeTime = parseRelativeTime(entry.job.schedule);
     let newScheduled: schedule.Job;
 
-    if (relativeTime) {
-      newScheduled = schedule.scheduleJob(relativeTime, () => {
+    if (entry.job.oneShot && entry.job.nextRun) {
+      // One-shot reminders: use the stored target date, not the cron expression
+      newScheduled = schedule.scheduleJob(entry.job.nextRun, () => {
         this.runCronJob(jobId);
       });
     } else {
-      newScheduled = schedule.scheduleJob(entry.job.schedule, () => {
-        this.runCronJob(jobId);
-      });
+      const relativeTime = parseRelativeTime(entry.job.schedule);
+      if (relativeTime) {
+        newScheduled = schedule.scheduleJob(relativeTime, () => {
+          this.runCronJob(jobId);
+        });
+      } else {
+        newScheduled = schedule.scheduleJob(entry.job.schedule, () => {
+          this.runCronJob(jobId);
+        });
+      }
     }
 
     entry.scheduled = newScheduled;
