@@ -772,7 +772,7 @@ class DiffFormatter:
             raise ValueError("No staged changes to commit")
 
         # Get recent commits for style reference
-        log_result = self.log(max_count=5, oneline=True)
+        log_result = self.log(n=5, oneline=True)
         recent_commits = log_result.output if log_result.success else ""
 
         # Build prompt for LLM
