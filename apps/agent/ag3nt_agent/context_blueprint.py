@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -295,20 +296,24 @@ class BlueprintStore:
 
 _store: BlueprintStore | None = None
 _active_blueprint_id: str | None = None
+_lock = threading.Lock()
 
 
 def _get_store() -> BlueprintStore:
     global _store
-    if _store is None:
-        _store = BlueprintStore()
-    return _store
+    with _lock:
+        if _store is None:
+            _store = BlueprintStore()
+        return _store
 
 
 def _get_active_blueprint() -> ContextBlueprint | None:
     """Get the currently active blueprint, if any."""
-    if _active_blueprint_id is None:
+    with _lock:
+        active_id = _active_blueprint_id
+    if active_id is None:
         return None
-    return _get_store().load(_active_blueprint_id)
+    return _get_store().load(active_id)
 
 
 # ---------------------------------------------------------------------------
@@ -430,7 +435,8 @@ def write_blueprint(
 
     store = _get_store()
     store.save(blueprint)
-    _active_blueprint_id = blueprint_id
+    with _lock:
+        _active_blueprint_id = blueprint_id
 
     summary_lines = [
         f"Blueprint created: {blueprint_id}",
