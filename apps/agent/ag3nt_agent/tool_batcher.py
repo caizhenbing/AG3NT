@@ -138,7 +138,7 @@ class ToolBatcher:
             return await self._execute_single(tool_fn, args)
 
         # Add to pending batch
-        future: asyncio.Future[Any] = asyncio.get_event_loop().create_future()
+        future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
         call = PendingCall(tool_name=tool_name, args=args, future=future)
 
         async with self._lock:
@@ -217,7 +217,7 @@ class ToolBatcher:
             return await tool_fn(**args)
         else:
             # Run sync function in thread pool
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             return await loop.run_in_executor(
                 None, lambda: tool_fn(**args)
             )
