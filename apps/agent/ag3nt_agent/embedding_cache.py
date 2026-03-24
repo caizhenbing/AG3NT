@@ -17,6 +17,7 @@ import hashlib
 import json
 import logging
 import sqlite3
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,7 +54,8 @@ class EmbeddingCache:
     """SQLite-backed embedding cache.
 
     Caches embeddings by content hash to avoid re-computing embeddings
-    for unchanged content.
+    for unchanged content. All database operations are protected by a
+    threading lock for safe concurrent access.
     """
 
     def __init__(
@@ -75,38 +77,44 @@ class EmbeddingCache:
         self._conn: sqlite3.Connection | None = None
         self._stats = CacheStats()
         self._initialized = False
+        self._db_lock = threading.Lock()
 
     def _ensure_initialized(self) -> None:
         """Initialize the database connection and schema."""
         if self._initialized:
             return
 
-        # Create cache directory
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._db_lock:
+            # Double-check after acquiring lock
+            if self._initialized:
+                return
 
-        # Connect to database
-        self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
+            # Create cache directory
+            self._db_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Create schema
-        self._conn.execute("""
-            CREATE TABLE IF NOT EXISTS embeddings (
-                content_hash TEXT PRIMARY KEY,
-                embedding TEXT NOT NULL,
-                provider TEXT,
-                model TEXT,
-                dimensions INTEGER,
-                created_at REAL NOT NULL,
-                last_accessed REAL NOT NULL
-            )
-        """)
-        self._conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_embeddings_accessed
-            ON embeddings(last_accessed)
-        """)
-        self._conn.commit()
-        self._initialized = True
-        logger.debug(f"Embedding cache initialized at {self._db_path}")
+            # Connect to database
+            self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
+            self._conn.row_factory = sqlite3.Row
+
+            # Create schema
+            self._conn.execute("""
+                CREATE TABLE IF NOT EXISTS embeddings (
+                    content_hash TEXT PRIMARY KEY,
+                    embedding TEXT NOT NULL,
+                    provider TEXT,
+                    model TEXT,
+                    dimensions INTEGER,
+                    created_at REAL NOT NULL,
+                    last_accessed REAL NOT NULL
+                )
+            """)
+            self._conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_embeddings_accessed
+                ON embeddings(last_accessed)
+            """)
+            self._conn.commit()
+            self._initialized = True
+            logger.debug(f"Embedding cache initialized at {self._db_path}")
 
     def _compute_hash(self, content: str) -> str:
         """Compute MD5 hash for content."""
@@ -125,22 +133,23 @@ class EmbeddingCache:
         self._stats.total_queries += 1
 
         content_hash = self._compute_hash(content)
-        cursor = self._conn.execute(
-            "SELECT embedding FROM embeddings WHERE content_hash = ?",
-            (content_hash,),
-        )
-        row = cursor.fetchone()
+        with self._db_lock:
+            cursor = self._conn.execute(
+                "SELECT embedding FROM embeddings WHERE content_hash = ?",
+                (content_hash,),
+            )
+            row = cursor.fetchone()
 
-        if row is None:
-            self._stats.misses += 1
-            return None
+            if row is None:
+                self._stats.misses += 1
+                return None
 
-        # Update last accessed time
-        self._conn.execute(
-            "UPDATE embeddings SET last_accessed = ? WHERE content_hash = ?",
-            (time.time(), content_hash),
-        )
-        self._conn.commit()
+            # Update last accessed time
+            self._conn.execute(
+                "UPDATE embeddings SET last_accessed = ? WHERE content_hash = ?",
+                (time.time(), content_hash),
+            )
+            self._conn.commit()
 
         self._stats.hits += 1
         return json.loads(row["embedding"])
@@ -165,23 +174,24 @@ class EmbeddingCache:
         content_hash = self._compute_hash(content)
         now = time.time()
 
-        self._conn.execute(
-            """
-            INSERT OR REPLACE INTO embeddings
-            (content_hash, embedding, provider, model, dimensions, created_at, last_accessed)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                content_hash,
-                json.dumps(embedding),
-                provider,
-                model,
-                len(embedding),
-                now,
-                now,
-            ),
-        )
-        self._conn.commit()
+        with self._db_lock:
+            self._conn.execute(
+                """
+                INSERT OR REPLACE INTO embeddings
+                (content_hash, embedding, provider, model, dimensions, created_at, last_accessed)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    content_hash,
+                    json.dumps(embedding),
+                    provider,
+                    model,
+                    len(embedding),
+                    now,
+                    now,
+                ),
+            )
+            self._conn.commit()
 
     def get_or_compute(
         self,
@@ -267,13 +277,14 @@ class EmbeddingCache:
         max_age = max_age_days or self._max_age_days
         cutoff = time.time() - (max_age * 24 * 3600)
 
-        cursor = self._conn.execute(
-            "DELETE FROM embeddings WHERE last_accessed < ?",
-            (cutoff,),
-        )
-        self._conn.commit()
+        with self._db_lock:
+            cursor = self._conn.execute(
+                "DELETE FROM embeddings WHERE last_accessed < ?",
+                (cutoff,),
+            )
+            self._conn.commit()
+            removed = cursor.rowcount
 
-        removed = cursor.rowcount
         if removed > 0:
             logger.info(f"Cleaned up {removed} stale embedding cache entries")
         return removed
@@ -290,27 +301,29 @@ class EmbeddingCache:
         self._ensure_initialized()
 
         max_count = max_entries or self._max_entries
-        count = self._conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
 
-        if count <= max_count:
-            return 0
+        with self._db_lock:
+            count = self._conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
 
-        # Delete oldest entries
-        to_delete = count - max_count
-        cursor = self._conn.execute(
-            """
-            DELETE FROM embeddings
-            WHERE content_hash IN (
-                SELECT content_hash FROM embeddings
-                ORDER BY last_accessed ASC
-                LIMIT ?
+            if count <= max_count:
+                return 0
+
+            # Delete oldest entries
+            to_delete = count - max_count
+            cursor = self._conn.execute(
+                """
+                DELETE FROM embeddings
+                WHERE content_hash IN (
+                    SELECT content_hash FROM embeddings
+                    ORDER BY last_accessed ASC
+                    LIMIT ?
+                )
+                """,
+                (to_delete,),
             )
-            """,
-            (to_delete,),
-        )
-        self._conn.commit()
+            self._conn.commit()
+            removed = cursor.rowcount
 
-        removed = cursor.rowcount
         if removed > 0:
             logger.info(f"Cleaned up {removed} LRU embedding cache entries")
         return removed
@@ -323,10 +336,11 @@ class EmbeddingCache:
         """
         self._ensure_initialized()
 
-        cursor = self._conn.execute("DELETE FROM embeddings")
-        self._conn.commit()
+        with self._db_lock:
+            cursor = self._conn.execute("DELETE FROM embeddings")
+            self._conn.commit()
+            removed = cursor.rowcount
 
-        removed = cursor.rowcount
         logger.info(f"Cleared {removed} embedding cache entries")
         return removed
 
@@ -338,10 +352,11 @@ class EmbeddingCache:
         """
         self._ensure_initialized()
 
-        # Update entry count
-        self._stats.entries_count = self._conn.execute(
-            "SELECT COUNT(*) FROM embeddings"
-        ).fetchone()[0]
+        with self._db_lock:
+            # Update entry count
+            self._stats.entries_count = self._conn.execute(
+                "SELECT COUNT(*) FROM embeddings"
+            ).fetchone()[0]
 
         # Get cache size
         self._stats.cache_size_bytes = self._db_path.stat().st_size if self._db_path.exists() else 0
@@ -350,10 +365,11 @@ class EmbeddingCache:
 
     def close(self) -> None:
         """Close the database connection."""
-        if self._conn:
-            self._conn.close()
-            self._conn = None
-            self._initialized = False
+        with self._db_lock:
+            if self._conn:
+                self._conn.close()
+                self._conn = None
+                self._initialized = False
 
 
 # Global cache instance
@@ -378,4 +394,3 @@ def reset_embedding_cache() -> None:
     if _embedding_cache is not None:
         _embedding_cache.close()
     _embedding_cache = None
-
