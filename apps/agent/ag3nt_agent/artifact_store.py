@@ -211,31 +211,37 @@ class ArtifactStore:
             )
 
         content_hash = self._compute_hash(content_bytes)
-        artifact_id = self._generate_artifact_id(content_hash)
 
-        # Check for duplicate by hash
-        for existing in self._metadata_cache.values():
-            if existing.content_hash == content_hash:
-                logger.debug(f"Artifact with hash {content_hash[:12]} already exists")
-                return existing
+        # Lock covers dedup check + file write + metadata update to prevent
+        # concurrent writes with identical content from bypassing dedup.
+        with self._lock:
+            # Check for duplicate by hash (inside lock to avoid TOCTOU race)
+            for existing in self._metadata_cache.values():
+                if existing.content_hash == content_hash:
+                    logger.debug(f"Artifact with hash {content_hash[:12]} already exists")
+                    return existing
 
-        # Write content file
-        content_path = self._get_content_path(artifact_id)
-        with open(content_path, "w", encoding="utf-8") as f:
-            f.write(content)
+            artifact_id = self._generate_artifact_id(content_hash)
 
-        # Create and store metadata
-        meta = ArtifactMeta(
-            artifact_id=artifact_id,
-            tool_name=tool_name,
-            content_hash=content_hash,
-            size_bytes=len(content_bytes),
-            created_at=datetime.now(UTC).isoformat(),
-            source_url=source_url,
-            session_id=session_id,
-            tags=tags or [],
-        )
-        self._append_metadata(meta)
+            # Write content file
+            content_path = self._get_content_path(artifact_id)
+            with open(content_path, "w", encoding="utf-8") as f:
+                f.write(content)
+
+            # Create and store metadata (inline to avoid re-acquiring lock)
+            meta = ArtifactMeta(
+                artifact_id=artifact_id,
+                tool_name=tool_name,
+                content_hash=content_hash,
+                size_bytes=len(content_bytes),
+                created_at=datetime.now(UTC).isoformat(),
+                source_url=source_url,
+                session_id=session_id,
+                tags=tags or [],
+            )
+            with open(self._metadata_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(meta.to_dict()) + "\n")
+            self._metadata_cache[meta.artifact_id] = meta
 
         logger.info(f"Stored artifact {artifact_id} ({len(content_bytes)} bytes)")
         return meta
