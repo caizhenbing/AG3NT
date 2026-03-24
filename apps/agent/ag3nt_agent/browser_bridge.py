@@ -163,12 +163,12 @@ class BrowserBridge:
                 elif msg_type == "pong":
                     pass  # heartbeat
                 elif msg_type == "error":
-                    # Resolve any pending request with the error
+                    # Resolve ALL pending requests with the error
                     for key in list(self._pending.keys()):
                         fut = self._pending.pop(key)
                         if not fut.done():
                             fut.set_result(msg)
-                        break
+                    self._pending.clear()
 
         except asyncio.CancelledError:
             pass
