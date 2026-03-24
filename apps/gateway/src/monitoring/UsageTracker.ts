@@ -149,6 +149,7 @@ export class UsageTracker {
     if (filtered.length === 0) return stats;
 
     let totalLatency = 0;
+    const providerLatency: Record<string, number> = {};
 
     for (const record of filtered) {
       stats.totalTokens += record.totalTokens;
@@ -160,13 +161,22 @@ export class UsageTracker {
       // By provider
       if (!stats.byProvider[record.provider]) {
         stats.byProvider[record.provider] = { calls: 0, tokens: 0, cost: 0, averageLatencyMs: 0 };
+        providerLatency[record.provider] = 0;
       }
       stats.byProvider[record.provider].calls++;
       stats.byProvider[record.provider].tokens += record.totalTokens;
       stats.byProvider[record.provider].cost += record.cost;
+      providerLatency[record.provider] = (providerLatency[record.provider] ?? 0) + record.latencyMs;
     }
 
     stats.averageLatencyMs = totalLatency / filtered.length;
+
+    // Compute per-provider average latency
+    for (const provider of Object.keys(stats.byProvider)) {
+      stats.byProvider[provider].averageLatencyMs =
+        providerLatency[provider] / stats.byProvider[provider].calls;
+    }
+
     return stats;
   }
 }
