@@ -658,6 +658,8 @@ export async function createGateway(config: Config): Promise<Gateway> {
     const sessions = sessionManager.listSessions();
     let cleared = 0;
     for (const session of sessions) {
+      // Delete message history before removing the session to avoid orphaned rows
+      messageStore.deleteSessionMessages(session.id);
       if (sessionManager.removeSession(session.id)) {
         cleared++;
       }
