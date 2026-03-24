@@ -355,24 +355,8 @@ export async function createGateway(config: Config): Promise<Gateway> {
     }
   );
 
-  // Health check endpoint
-  app.get(`${config.gateway.httpPath}/health`, (_req, res) => {
-    const schedulerStatus = scheduler.getStatus();
-    res.json({
-      ok: true,
-      name: "ag3nt-gateway",
-      channels: channelRegistry.all().map((a) => ({
-        id: a.id,
-        type: a.type,
-        connected: a.isConnected(),
-      })),
-      sessions: sessionManager.listSessions().length,
-      scheduler: {
-        heartbeatRunning: schedulerStatus.heartbeatRunning,
-        jobCount: schedulerStatus.jobCount,
-      },
-    });
-  });
+  // Health check endpoint — handled by createHealthRoutes mounted at /api/health (line 551)
+  // Inline handler removed to avoid shadowing the richer dependency-aware health router.
 
   // Scheduler API endpoints
   app.get(`${config.gateway.httpPath}/scheduler/status`, (_req, res) => {
