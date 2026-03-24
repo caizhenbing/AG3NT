@@ -50,7 +50,7 @@ export async function createAIModel({
             if (isImage) {
                 return client.imageModel(modelId)
             }
-            return (openaiResponsesModel ? provider.responses(modelId) : provider.chat(modelId))
+            return (openaiResponsesModel ? client.responses(modelId) : client.chat(modelId))
         }
         case AIProviderName.ANTHROPIC: {
             const client = createAnthropic({ apiKey: auth.apiKey })
