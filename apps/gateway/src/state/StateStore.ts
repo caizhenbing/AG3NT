@@ -388,32 +388,49 @@ export class RedisStateStore extends EventEmitter implements StateStore {
 /** Global state store instance */
 let _stateStore: StateStore | null = null;
 
+/** In-flight creation promise — prevents concurrent callers from each creating a store */
+let _storePromise: Promise<StateStore> | null = null;
+
 /**
  * Create or get the shared state store.
  *
  * Uses Redis if AG3NT_REDIS_URL is set, otherwise uses in-memory store.
+ * Uses a promise-based mutex so concurrent callers share one initialization.
  */
 export async function getStateStore(): Promise<StateStore> {
   if (_stateStore) {
     return _stateStore;
   }
 
-  const redisUrl = process.env.AG3NT_REDIS_URL;
-
-  if (redisUrl) {
-    try {
-      _stateStore = await RedisStateStore.create(redisUrl);
-      console.log("[StateStore] Using Redis backend");
-    } catch (err) {
-      console.warn("[StateStore] Redis failed, falling back to in-memory:", err);
-      _stateStore = new InMemoryStateStore();
-    }
-  } else {
-    _stateStore = new InMemoryStateStore();
-    console.log("[StateStore] Using in-memory backend");
+  if (_storePromise) {
+    return _storePromise;
   }
 
-  return _stateStore;
+  _storePromise = (async () => {
+    try {
+      const redisUrl = process.env.AG3NT_REDIS_URL;
+
+      if (redisUrl) {
+        try {
+          _stateStore = await RedisStateStore.create(redisUrl);
+          console.log("[StateStore] Using Redis backend");
+        } catch (err) {
+          console.warn("[StateStore] Redis failed, falling back to in-memory:", err);
+          _stateStore = new InMemoryStateStore();
+        }
+      } else {
+        _stateStore = new InMemoryStateStore();
+        console.log("[StateStore] Using in-memory backend");
+      }
+
+      return _stateStore;
+    } catch (err) {
+      _storePromise = null;
+      throw err;
+    }
+  })();
+
+  return _storePromise;
 }
 
 /**
@@ -424,6 +441,7 @@ export async function closeStateStore(): Promise<void> {
     await _stateStore.close();
     _stateStore = null;
   }
+  _storePromise = null;
 }
 
 /**
