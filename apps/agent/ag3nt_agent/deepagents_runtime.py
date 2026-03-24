@@ -1682,7 +1682,7 @@ def _extract_interrupt_info(result: dict[str, Any]) -> dict[str, Any] | None:
 
     # Otherwise, handle as tool approval interrupt
     # Extract action requests and review configs
-    review_configs = interrupt_value.get("review_configs", [])
+    review_configs = interrupts[0].value.get("review_configs", []) if interrupts else []
 
     # Format pending actions for display
     pending_actions = []
@@ -1845,7 +1845,7 @@ def run_turn(
         _pending_interrupt_ids[session_id] = interrupt_info.get("interrupt_ids", [interrupt_info["interrupt_id"]])
         # Format the pending actions for the user
         action_text = "\n\n".join(
-            action["description"] for action in interrupt_info["pending_actions"]
+            action["description"] for action in interrupt_info.get("pending_actions", [])
         )
         return {
             "session_id": session_id,
@@ -1933,7 +1933,7 @@ def resume_turn(
         # Store new interrupt IDs for next resume
         _pending_interrupt_ids[session_id] = interrupt_info.get("interrupt_ids", [interrupt_info["interrupt_id"]])
         action_text = "\n\n".join(
-            action["description"] for action in interrupt_info["pending_actions"]
+            action["description"] for action in interrupt_info.get("pending_actions", [])
         )
         return {
             "session_id": session_id,
