@@ -107,13 +107,25 @@ class PlanningTools:
                 self.tasks = {}
 
     def _save(self) -> None:
-        """Save tasks to storage file using atomic write."""
-        self.storage_path.parent.mkdir(parents=True, exist_ok=True)
-        data = {"tasks": [task.to_dict() for task in self.tasks.values()]}
-        tmp_path = self.storage_path.with_suffix(".tmp")
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        tmp_path.replace(self.storage_path)
+        """Save tasks to storage file using atomic write.
+
+        On OSError the in-memory state is rolled back to match the last
+        successful on-disk state so the two never diverge.
+        """
+        # Snapshot current in-memory state so we can restore on failure.
+        backup = {tid: Task.from_dict(t.to_dict()) for tid, t in self.tasks.items()}
+        try:
+            self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+            data = {"tasks": [task.to_dict() for task in self.tasks.values()]}
+            tmp_path = self.storage_path.with_suffix(".tmp")
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+            tmp_path.replace(self.storage_path)
+        except OSError as exc:
+            logger.error("Failed to save tasks to %s: %s", self.storage_path, exc)
+            # Revert in-memory state to the pre-mutation snapshot so it
+            # stays consistent with what is (or was) on disk.
+            self.tasks = backup
 
     def create_task(
         self,
