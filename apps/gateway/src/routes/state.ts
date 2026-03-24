@@ -49,6 +49,27 @@ export function createStateRouter(): Router {
   });
 
   /**
+   * List all sessions.
+   */
+  router.get("/", async (_req: Request, res: Response) => {
+    try {
+      const store = await getStateStore();
+      const sessionIds = await store.listSessions();
+
+      res.json({
+        ok: true,
+        sessions: sessionIds,
+        count: sessionIds.length,
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : "Unknown error",
+      });
+    }
+  });
+
+  /**
    * Get session state.
    */
   router.get("/:sessionId", async (req: Request, res: Response) => {
@@ -155,27 +176,6 @@ export function createStateRouter(): Router {
       }
 
       res.json({ ok: true, sessionId });
-    } catch (err) {
-      res.status(500).json({
-        ok: false,
-        error: err instanceof Error ? err.message : "Unknown error",
-      });
-    }
-  });
-
-  /**
-   * List all sessions.
-   */
-  router.get("/", async (_req: Request, res: Response) => {
-    try {
-      const store = await getStateStore();
-      const sessionIds = await store.listSessions();
-
-      res.json({
-        ok: true,
-        sessions: sessionIds,
-        count: sessionIds.length,
-      });
     } catch (err) {
       res.status(500).json({
         ok: false,
