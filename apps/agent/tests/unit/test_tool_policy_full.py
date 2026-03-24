@@ -29,7 +29,7 @@ from ag3nt_agent.tool_policy import (
 class TestToolPolicy:
     def test_defaults(self):
         p = ToolPolicy()
-        assert p.allow == []
+        assert p.allow is None
         assert p.deny == []
         assert p.profile == "coding"
 
@@ -64,9 +64,13 @@ class TestToolPolicy:
         assert p.is_tool_allowed("ask_user") is True
         assert p.is_tool_allowed("unknown_tool") is False
 
-    def test_no_allow_list_allows_all(self):
-        p = ToolPolicy(allow=[], deny=[])
+    def test_allow_none_permits_all(self):
+        p = ToolPolicy(allow=None, deny=[])
         assert p.is_tool_allowed("anything") is True
+
+    def test_empty_allow_list_denies_all(self):
+        p = ToolPolicy(allow=[], deny=[])
+        assert p.is_tool_allowed("anything") is False
 
     def test_deny_with_group(self):
         p = ToolPolicy(allow=["*"], deny=["group:runtime"])

@@ -119,7 +119,7 @@ PROFILES: dict[str, dict[str, Any]] = {
 class ToolPolicy:
     """Resolved tool access policy."""
 
-    allow: list[str] = field(default_factory=list)
+    allow: list[str] | None = field(default=None)
     deny: list[str] = field(default_factory=list)
     profile: str = "coding"
 
@@ -147,24 +147,25 @@ class ToolPolicy:
             True if the tool is allowed
         """
         denied = self._expand_groups(self.deny)
-        allowed = self._expand_groups(self.allow)
 
-        # Deny wins
+        # Deny always wins
         if name in denied:
             return False
 
-        # Allow check
+        # If allow is None (not configured), allow everything not denied
+        if self.allow is None:
+            return True
+
+        # Allow list is explicitly set (possibly empty)
+        allowed = self._expand_groups(self.allow)
+
         if "*" in allowed:
             return True
         if name in allowed:
             return True
 
-        # If allow list is non-empty and not wildcard, deny by default
-        if allowed and "*" not in allowed:
-            return False
-
-        # If no allow list specified, allow everything not denied
-        return True
+        # Tool not in explicit allow list — deny
+        return False
 
 
 class ToolPolicyManager:
@@ -193,11 +194,11 @@ class ToolPolicyManager:
 
         if config:
             profile = profile_override or config.get("profile", "coding")
-            allow = config.get("allow", [])
+            allow = config.get("allow") if "allow" in config else None
             deny = config.get("deny", [])
 
             # If profile specified, merge profile defaults with config overrides
-            if profile in PROFILES and not allow and not deny:
+            if profile in PROFILES and allow is None and not deny:
                 profile_config = PROFILES[profile]
                 allow = profile_config.get("allow", [])
                 deny = profile_config.get("deny", [])
