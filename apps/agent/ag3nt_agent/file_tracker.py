@@ -84,13 +84,14 @@ class FileTracker:
         mtime = os.path.getmtime(file_path)
         now = time.time()
 
-        if session_id not in self._tracking:
-            self._tracking[session_id] = {}
+        with self._meta_lock:
+            if session_id not in self._tracking:
+                self._tracking[session_id] = {}
 
-        self._tracking[session_id][file_path] = FileRecord(
-            read_at=now,
-            mtime_at_read=mtime,
-        )
+            self._tracking[session_id][file_path] = FileRecord(
+                read_at=now,
+                mtime_at_read=mtime,
+            )
         logger.debug(
             "Recorded read: session=%s file=%s mtime=%f",
             session_id,
@@ -109,19 +110,20 @@ class FileTracker:
         mtime = os.path.getmtime(file_path)
         now = time.time()
 
-        if session_id not in self._tracking:
-            self._tracking[session_id] = {}
+        with self._meta_lock:
+            if session_id not in self._tracking:
+                self._tracking[session_id] = {}
 
-        record = self._tracking[session_id].get(file_path)
-        if record is not None:
-            record.mtime_at_read = mtime
-            record.written_at = now
-        else:
-            self._tracking[session_id][file_path] = FileRecord(
-                read_at=now,
-                mtime_at_read=mtime,
-                written_at=now,
-            )
+            record = self._tracking[session_id].get(file_path)
+            if record is not None:
+                record.mtime_at_read = mtime
+                record.written_at = now
+            else:
+                self._tracking[session_id][file_path] = FileRecord(
+                    read_at=now,
+                    mtime_at_read=mtime,
+                    written_at=now,
+                )
 
         logger.debug(
             "Recorded write: session=%s file=%s mtime=%f",
