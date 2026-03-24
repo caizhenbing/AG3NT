@@ -250,13 +250,15 @@ class BrowserBridge:
             # For selector clicks via the WS protocol, we send a click message
             # with the selector. The server's handle_input will use page.click().
             await self._send_agent_action("click", selector=selector)
-            await self._send({"type": "click_selector", "selector": selector})
-            # Give the page time to process
-            await asyncio.sleep(0.3)
+            resp = await self._request("click_selector", {"type": "click_selector", "selector": selector})
+            if resp.get("type") == "error":
+                return f"Error clicking element '{selector}': {resp.get('message', 'unknown error')}"
             return f"Clicked element: {selector}"
         else:
             await self._send_agent_action("click", x=x, y=y)
-            await self._send({"type": "click", "x": x, "y": y})
+            resp = await self._request("click", {"type": "click", "x": x, "y": y})
+            if resp.get("type") == "error":
+                return f"Error clicking at ({x}, {y}): {resp.get('message', 'unknown error')}"
             return f"Clicked at ({x}, {y})"
 
     async def type_text(self, text: str, selector: Optional[str] = None) -> str:
@@ -264,10 +266,15 @@ class BrowserBridge:
         if selector:
             await self._send_agent_action("type", selector=selector)
             # Click the selector first to focus it, then type
-            await self._send({"type": "click_selector", "selector": selector})
-            await asyncio.sleep(0.2)
+            resp = await self._request("click_selector", {"type": "click_selector", "selector": selector})
+            if resp.get("type") == "error":
+                return f"Error focusing '{selector}': {resp.get('message', 'unknown error')}"
         await self._send_agent_action("type", text=text[:50])
-        await self._send({"type": "type", "text": text})
+        resp = await self._request("type", {"type": "type", "text": text})
+        if resp.get("type") == "error":
+            if selector:
+                return f"Error typing into '{selector}': {resp.get('message', 'unknown error')}"
+            return f"Error typing text: {resp.get('message', 'unknown error')}"
         if selector:
             return f"Filled '{selector}' with: {text}"
         return f"Typed: {text}"
