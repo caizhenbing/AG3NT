@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shlex
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -254,7 +255,7 @@ async def ensure_server_installed(config: LspServerConfig) -> bool:
 
     try:
         process = await asyncio.create_subprocess_exec(
-            *config.install_command.split(),
+            *shlex.split(config.install_command),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
