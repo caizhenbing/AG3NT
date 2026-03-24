@@ -157,7 +157,7 @@ class AgentPool:
         logger.info(f"Initializing agent pool with {self.pool_size} agents...")
         start_time = time.time()
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         # Build agents in parallel using thread pool
         async def build_one(index: int) -> PoolEntry | None:
@@ -267,7 +267,7 @@ class AgentPool:
 
         logger.warning("Pool exhausted, building agent on demand")
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         agent = await loop.run_in_executor(None, self._build_agent)
         return PoolEntry(agent=agent)
 
@@ -356,9 +356,9 @@ class AgentPool:
                         self._stats.warmups_completed += 1
                         self._stats.current_size = len(self._pool)
                         logger.debug("Background warmup completed")
+                    self._warming = False
             except Exception as e:
                 logger.error(f"Background warmup failed: {e}")
-            finally:
                 with self._lock:
                     self._warming = False
 
