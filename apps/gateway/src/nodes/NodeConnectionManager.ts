@@ -2,6 +2,7 @@
  * NodeConnectionManager - Manages WebSocket connections to companion nodes
  */
 
+import crypto from "crypto";
 import type { WebSocket } from "ws";
 import { NodeRegistry } from "./NodeRegistry.js";
 import { PairingManager } from "./PairingManager.js";
@@ -121,7 +122,7 @@ export class NodeConnectionManager {
     }
 
     // Generate unique node ID
-    const nodeId = `companion-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const nodeId = `companion-${crypto.randomUUID()}`;
 
     // Register in NodeRegistry
     const nodeInfo = this.registry.registerNode({
