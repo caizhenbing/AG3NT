@@ -1,3 +1,5 @@
+import crypto from 'crypto';
+
 /**
  * PairingManager - Manages pairing codes for companion node authentication
  */
@@ -41,7 +43,7 @@ export class PairingManager {
     // Clean up expired codes
     this.cleanupExpiredCodes();
 
-    console.log(`[PairingManager] Generated pairing code: ${code}`);
+    console.log('[PairingManager] Pairing code generated (code redacted)');
     return code;
   }
 
@@ -78,11 +80,15 @@ export class PairingManager {
    * Validate a shared secret (for pre-approved nodes)
    */
   validateSharedSecret(secret: string): boolean {
-    // Check if any approved node has this shared secret
+    // Check if any approved node has this shared secret (timing-safe comparison)
+    const secretBuf = Buffer.from(secret);
     for (const node of this.approvedNodes.values()) {
-      if (node.sharedSecret === secret) {
-        console.log(`[PairingManager] Shared secret validated for node: ${node.nodeId}`);
-        return true;
+      if (node.sharedSecret) {
+        const expectedBuf = Buffer.from(node.sharedSecret);
+        if (secretBuf.length === expectedBuf.length && crypto.timingSafeEqual(secretBuf, expectedBuf)) {
+          console.log(`[PairingManager] Shared secret validated for node: ${node.nodeId}`);
+          return true;
+        }
       }
     }
 
@@ -169,4 +175,3 @@ export class PairingManager {
     return this.getApprovedNodes();
   }
 }
-
