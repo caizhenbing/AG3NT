@@ -10,6 +10,7 @@
 
 import { existsSync, readdirSync, statSync } from 'fs';
 import { resolve, join, dirname, basename, extname } from 'path';
+import { pathToFileURL } from 'url';
 import { homedir } from 'os';
 import type { Config } from '../config/schema.js';
 import type {
@@ -462,7 +463,7 @@ async function loadPluginModule(source: string): Promise<PluginModule> {
       // If jiti not available, try tsx or ts-node
       try {
         // Convert to file URL for ESM import
-        const fileUrl = `file:///${source.replace(/\\/g, '/')}`;
+        const fileUrl = pathToFileURL(source).href;
         return (await import(fileUrl)) as PluginModule;
       } catch (importErr) {
         throw new Error(
@@ -472,7 +473,7 @@ async function loadPluginModule(source: string): Promise<PluginModule> {
     }
   } else {
     // JavaScript files can be imported directly
-    const fileUrl = `file:///${source.replace(/\\/g, '/')}`;
+    const fileUrl = pathToFileURL(source).href;
     return (await import(fileUrl)) as PluginModule;
   }
 }
