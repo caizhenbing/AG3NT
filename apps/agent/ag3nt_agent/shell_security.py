@@ -310,7 +310,15 @@ class PathSandbox:
         # Check for path traversal attempts
         if ".." in command:
             # Extract potential paths and validate them
-            parts = command.split()
+            # Split on whitespace first, then further split on '=' to catch
+            # env-var assignments like VAR=/some/../etc/passwd
+            raw_parts = command.split()
+            parts = []
+            for raw_part in raw_parts:
+                if "=" in raw_part:
+                    parts.extend(raw_part.split("="))
+                else:
+                    parts.append(raw_part)
             for part in parts:
                 if ".." in part:
                     # Try to resolve the path
@@ -329,7 +337,9 @@ class PathSandbox:
                         pass  # Invalid path, let the shell handle it
 
         # Check for absolute paths in command
-        abs_path_pattern = re.compile(r'(?:^|\s)(/[^\s]+)')
+        # Match paths preceded by start-of-string, whitespace, or '=' to catch
+        # env-var assignments like LD_LIBRARY_PATH=/tmp/evil
+        abs_path_pattern = re.compile(r'(?:^|\s|=)(/[^\s]+)')
         for match in abs_path_pattern.finditer(command):
             abs_path = match.group(1)
             # Skip common safe paths
