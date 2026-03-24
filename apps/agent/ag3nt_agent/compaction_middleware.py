@@ -282,6 +282,7 @@ class CompactionMiddleware:
         if self._config.enable_masking:
             processed, artifacts = self._apply_masking(processed, session_id)
             metrics.artifacts_created = artifacts
+            token_count = count_tokens_approximately(processed)
             logger.debug(f"Masking: {artifacts} artifacts created")
 
         # Step 2: Memory flush
