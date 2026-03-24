@@ -88,9 +88,7 @@ export function createRequestLogger(options?: {
 }
 
 function getClientIp(req: Request): string {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string') {
-    return forwarded.split(',')[0].trim();
-  }
-  return req.socket.remoteAddress || 'unknown';
+  // Use req.ip which respects Express trust proxy setting.
+  // Only trusts X-Forwarded-For when trust proxy is configured.
+  return req.ip || req.socket.remoteAddress || 'unknown';
 }
