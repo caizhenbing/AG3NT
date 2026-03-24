@@ -172,20 +172,31 @@ export class RedisStateStore extends EventEmitter implements StateStore {
     new Set();
   private readonly keyPrefix = "ag3nt:session:";
   private readonly channelPrefix = "ag3nt:updates:";
+  private readonly redisUrl: string;
 
+  /**
+   * Create a RedisStateStore instance.
+   *
+   * NOTE: The store is not ready until `connect()` is awaited.
+   * Use the static `create()` factory method for a one-step setup.
+   */
   constructor(redisUrl: string) {
     super();
-    this.initRedis(redisUrl);
+    this.redisUrl = redisUrl;
   }
 
-  private async initRedis(redisUrl: string): Promise<void> {
+  /**
+   * Initialize the Redis connection. Must be awaited before using the store.
+   * Throws if the connection or subscription setup fails.
+   */
+  async connect(): Promise<void> {
     try {
       // Dynamic import to avoid dependency if not using Redis
       // @ts-expect-error ioredis types are optional - only needed when using Redis backend
       const { default: Redis } = await import("ioredis");
 
-      this.redis = new Redis(redisUrl);
-      this.subscriber = new Redis(redisUrl);
+      this.redis = new Redis(this.redisUrl);
+      this.subscriber = new Redis(this.redisUrl);
 
       // Subscribe to all session updates
       await this.subscriber.psubscribe(`${this.channelPrefix}*`);
@@ -207,12 +218,33 @@ export class RedisStateStore extends EventEmitter implements StateStore {
     }
   }
 
+  /**
+   * Static factory that creates and connects a RedisStateStore.
+   * Throws if the connection fails, making errors impossible to miss.
+   */
+  static async create(redisUrl: string): Promise<RedisStateStore> {
+    const store = new RedisStateStore(redisUrl);
+    await store.connect();
+    return store;
+  }
+
+  private assertReady(): void {
+    if (!this.redis) {
+      throw new Error(
+        "[RedisStateStore] Redis client is not connected. " +
+        "Await connect() or use RedisStateStore.create() before calling store methods."
+      );
+    }
+  }
+
   async getSession(sessionId: string): Promise<SessionState | null> {
+    this.assertReady();
     const data = await this.redis.get(`${this.keyPrefix}${sessionId}`);
     return data ? JSON.parse(data) : null;
   }
 
   async setSession(sessionId: string, state: SessionState): Promise<void> {
+    this.assertReady();
     await this.redis.set(
       `${this.keyPrefix}${sessionId}`,
       JSON.stringify(state)
@@ -225,6 +257,7 @@ export class RedisStateStore extends EventEmitter implements StateStore {
     updates: Partial<SessionState>,
     _source: UpdateSource
   ): Promise<SessionState> {
+    this.assertReady();
     // Use Lua script for atomic update
     const script = `
       local key = KEYS[1]
@@ -270,11 +303,13 @@ export class RedisStateStore extends EventEmitter implements StateStore {
   }
 
   async deleteSession(sessionId: string): Promise<boolean> {
+    this.assertReady();
     const result = await this.redis.del(`${this.keyPrefix}${sessionId}`);
     return result > 0;
   }
 
   async listSessions(): Promise<string[]> {
+    this.assertReady();
     const keys = await this.redis.keys(`${this.keyPrefix}*`);
     return keys.map((key: string) => key.replace(this.keyPrefix, ""));
   }
@@ -367,7 +402,7 @@ export async function getStateStore(): Promise<StateStore> {
 
   if (redisUrl) {
     try {
-      _stateStore = new RedisStateStore(redisUrl);
+      _stateStore = await RedisStateStore.create(redisUrl);
       console.log("[StateStore] Using Redis backend");
     } catch (err) {
       console.warn("[StateStore] Redis failed, falling back to in-memory:", err);
