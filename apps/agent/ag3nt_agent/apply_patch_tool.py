@@ -187,14 +187,32 @@ class PatchApplier:
         return result
 
     def _resolve_path(self, file_path: str) -> str:
-        """Resolve a file path relative to workspace root."""
+        """Resolve a file path relative to workspace root.
+
+        Raises:
+            ValueError: If the resolved path escapes the workspace root
+                (e.g. via ``..`` traversal or symlinks).
+        """
         # Handle absolute paths and virtual paths
         if file_path.startswith("/workspace/"):
             file_path = file_path[len("/workspace/"):]
         elif file_path.startswith("/"):
             file_path = file_path.lstrip("/")
 
-        return os.path.join(self.workspace_root, file_path)
+        joined = os.path.join(self.workspace_root, file_path)
+
+        # Resolve symlinks and '..' components to get a canonical path
+        resolved = os.path.realpath(joined)
+        real_root = os.path.realpath(self.workspace_root)
+
+        # Ensure the resolved path is within the workspace root
+        if resolved != real_root and not resolved.startswith(real_root + os.sep):
+            raise ValueError(
+                f"Path traversal blocked: '{file_path}' resolves to "
+                f"'{resolved}' which is outside workspace '{real_root}'"
+            )
+
+        return resolved
 
     def _apply_add(
         self,
