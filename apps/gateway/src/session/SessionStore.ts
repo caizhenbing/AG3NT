@@ -216,7 +216,7 @@ export class SessionStore {
       throw new Error(`Cannot update field: ${field}`);
     }
 
-    const serialized = typeof value === 'object' ? JSON.stringify(value) : value;
+    const serialized = value !== null && typeof value === 'object' ? JSON.stringify(value) : value;
     const now = new Date().toISOString();
 
     const result = this.db
