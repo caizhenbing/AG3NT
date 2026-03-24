@@ -9,6 +9,27 @@ function expandHome(p: string): string {
   return p;
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function deepMerge(
+  base: Record<string, unknown>,
+  override: Record<string, unknown>,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...base };
+  for (const key of Object.keys(override)) {
+    const baseVal = base[key];
+    const overrideVal = override[key];
+    if (isPlainObject(baseVal) && isPlainObject(overrideVal)) {
+      result[key] = deepMerge(baseVal, overrideVal);
+    } else {
+      result[key] = overrideVal;
+    }
+  }
+  return result;
+}
+
 async function readYamlIfExists(filePath: string): Promise<Record<string, unknown>> {
   try {
     const text = await fs.readFile(filePath, "utf8");
@@ -25,7 +46,7 @@ export async function loadConfig(): Promise<Config> {
   const base = await readYamlIfExists(defaultPath);
   const user = await readYamlIfExists(userPath);
 
-  const merged = { ...base, ...user };
+  const merged = deepMerge(base, user);
   const parsed = ConfigSchema.safeParse(merged);
   if (!parsed.success) {
     const message = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("\n");
