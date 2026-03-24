@@ -135,11 +135,22 @@ export function createStreamRouter(sessionManager: SessionManager): Router {
       }
     }, 30000);
 
-    // Clean up on disconnect
-    req.on("close", () => {
+    // Idempotent cleanup: clears interval and removes listener exactly once,
+    // regardless of which event (req close, res close, or error) fires first.
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
       toolEventBus.off(`session:${sessionId}`, onEvent);
       clearInterval(keepaliveInterval);
-    });
+    };
+
+    // Clean up on disconnect — listen on multiple events so that network
+    // partitions, proxy timeouts, and abrupt drops are all caught.
+    req.on("close", cleanup);
+    req.on("error", cleanup);
+    res.on("close", cleanup);
+    res.on("error", cleanup);
   });
 
   /**
@@ -201,10 +212,21 @@ export function createStreamRouter(sessionManager: SessionManager): Router {
       }
     }, 30000);
 
-    req.on("close", () => {
+    // Idempotent cleanup: clears interval and removes listener exactly once.
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
       toolEventBus.off("all", onEvent);
       clearInterval(keepaliveInterval);
-    });
+    };
+
+    // Clean up on disconnect — listen on multiple events so that network
+    // partitions, proxy timeouts, and abrupt drops are all caught.
+    req.on("close", cleanup);
+    req.on("error", cleanup);
+    res.on("close", cleanup);
+    res.on("error", cleanup);
   });
 
   /**
