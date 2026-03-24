@@ -356,20 +356,44 @@ export class AgentConnection extends EventEmitter {
 // =============================================================================
 
 let _agentConnection: AgentConnection | null = null;
+let _connectionPromise: Promise<AgentConnection> | null = null;
 
 /**
  * Get the singleton AgentConnection instance.
  * Creates and connects if not already done.
+ *
+ * Uses an async mutex (_connectionPromise) to prevent concurrent callers
+ * from racing past the null check and creating duplicate WebSocket connections.
  */
 export async function getAgentConnection(
   agentUrl: string,
   authToken?: string
 ): Promise<AgentConnection> {
-  if (!_agentConnection) {
-    _agentConnection = new AgentConnection(agentUrl, authToken);
-    await _agentConnection.connect();
+  // Fast path: already connected
+  if (_agentConnection) {
+    return _agentConnection;
   }
-  return _agentConnection;
+
+  // Mutex: if a connection attempt is already in-flight, reuse it
+  if (_connectionPromise) {
+    return _connectionPromise;
+  }
+
+  // Create connection in an async IIFE and store the promise as a mutex
+  _connectionPromise = (async () => {
+    try {
+      const conn = new AgentConnection(agentUrl, authToken);
+      await conn.connect();
+      _agentConnection = conn;
+      return conn;
+    } catch (err) {
+      // Reset on failure so future callers can retry
+      _connectionPromise = null;
+      throw err;
+    }
+  })();
+
+  return _connectionPromise;
 }
 
 /**
@@ -383,6 +407,7 @@ export function isWebSocketAvailable(): boolean {
  * Close the singleton connection.
  */
 export function closeAgentConnection(): void {
+  _connectionPromise = null;
   if (_agentConnection) {
     _agentConnection.close();
     _agentConnection = null;
