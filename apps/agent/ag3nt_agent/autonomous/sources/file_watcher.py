@@ -272,8 +272,14 @@ class FileWatcher:
             priority=EventPriority.MEDIUM
         )
 
-        emit_at = datetime.utcnow()
-        self._pending_events[key] = (emit_at, event)
+        if key in self._pending_events:
+            # Update event data but preserve original debounce timestamp
+            existing_emit_at, _ = self._pending_events[key]
+            self._pending_events[key] = (existing_emit_at, event)
+        else:
+            # First detection — start the debounce clock
+            emit_at = datetime.utcnow()
+            self._pending_events[key] = (emit_at, event)
 
     async def _process_pending_events(self):
         """Process and emit debounced events."""
