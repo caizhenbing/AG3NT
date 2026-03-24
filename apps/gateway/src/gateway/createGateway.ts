@@ -1076,14 +1076,14 @@ export async function createGateway(config: Config): Promise<Gateway> {
 
       // Update or add AG3NT_MODEL_PROVIDER
       if (content.includes("AG3NT_MODEL_PROVIDER=")) {
-        content = content.replace(/AG3NT_MODEL_PROVIDER=.*/g, `AG3NT_MODEL_PROVIDER=${provider}`);
+        content = content.replace(/AG3NT_MODEL_PROVIDER=.*/g, () => `AG3NT_MODEL_PROVIDER=${provider}`);
       } else {
         content += `\nAG3NT_MODEL_PROVIDER=${provider}`;
       }
 
       // Update or add AG3NT_MODEL_NAME
       if (content.includes("AG3NT_MODEL_NAME=")) {
-        content = content.replace(/AG3NT_MODEL_NAME=.*/g, `AG3NT_MODEL_NAME=${model}`);
+        content = content.replace(/AG3NT_MODEL_NAME=.*/g, () => `AG3NT_MODEL_NAME=${model}`);
       } else {
         content += `\nAG3NT_MODEL_NAME=${model}`;
       }
@@ -1235,7 +1235,7 @@ export async function createGateway(config: Config): Promise<Gateway> {
 
       // Security: prevent path traversal
       const normalizedPath = path.normalize(fullPath);
-      if (!normalizedPath.startsWith(userDataPath)) {
+      if (!normalizedPath.startsWith(userDataPath + path.sep) && normalizedPath !== userDataPath) {
         sendError(res, "Path traversal not allowed", 403);
         return;
       }
@@ -1279,7 +1279,7 @@ export async function createGateway(config: Config): Promise<Gateway> {
 
       // Security: prevent path traversal
       const normalizedPath = path.normalize(fullPath);
-      if (!normalizedPath.startsWith(userDataPath)) {
+      if (!normalizedPath.startsWith(userDataPath + path.sep) && normalizedPath !== userDataPath) {
         sendError(res, "Path traversal not allowed", 403);
         return;
       }
@@ -1321,7 +1321,7 @@ export async function createGateway(config: Config): Promise<Gateway> {
 
       // Security check
       const normalizedPath = path.normalize(filePath);
-      if (!normalizedPath.startsWith(userDataPath)) {
+      if (!normalizedPath.startsWith(userDataPath + path.sep) && normalizedPath !== userDataPath) {
         sendError(res, "Path traversal not allowed", 403);
         return;
       }
