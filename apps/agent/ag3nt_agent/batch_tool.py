@@ -178,10 +178,19 @@ def batch(
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            # Already inside an async context — use nest_asyncio-style approach
+            # Already inside an async context — schedule on the caller's loop
+            # so coroutines retain access to the caller's resources (connections,
+            # shared state, etc.).  run_coroutine_threadsafe returns a
+            # concurrent.futures.Future; calling .result() blocks the current
+            # (executor) thread until the coroutine completes on the caller's loop.
             import concurrent.futures
+            caller_loop = loop
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                raw_results = pool.submit(lambda: asyncio.run(_run_all())).result()
+                raw_results = pool.submit(
+                    lambda: asyncio.run_coroutine_threadsafe(
+                        _run_all(), caller_loop
+                    ).result()
+                ).result()
         else:
             raw_results = loop.run_until_complete(_run_all())
     except RuntimeError:
