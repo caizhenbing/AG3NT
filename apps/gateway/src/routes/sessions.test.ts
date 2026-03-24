@@ -207,7 +207,7 @@ describe("Session Routes", () => {
       });
     });
 
-    it("should default to assistant role", async () => {
+    it("should default to user role", async () => {
       sessionManager.createSession({ id: "session-1" });
 
       await request(app)
@@ -215,7 +215,7 @@ describe("Session Routes", () => {
         .send({ content: "Response" });
 
       expect(messageStore.addMessage).toHaveBeenCalledWith("session-1", {
-        role: "assistant",
+        role: "user",
         content: "Response",
       });
     });
